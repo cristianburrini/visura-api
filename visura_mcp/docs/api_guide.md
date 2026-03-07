@@ -14,16 +14,16 @@ Questa guida aiuta a capire come funziona il sistema catastale italiano (SISTER)
 
 ### Tipi di Ricerca
 1. **Terreni (T)**: Ricerca per terreni. Restituisce i proprietari (intestati) direttamente nel risultato della visura.
-2. **Fabbricati (F)**: Ricerca per edifici. Se cerchi una particella con molti subalterni, potresti ricevere una lista di immobili. Dovrai quindi usare `request_intestati` con un `subalterno` specifico per ottenere i proprietari.
+2. **Fabbricati (F)**: Ricerca per edifici. Se cerchi una particella con molti subalterni, potresti ricevere una lista di immobili. Dovrai quindi usare `avvia_ricerca_intestatari` con un `subalterno` specifico per ottenere i proprietari.
 
 ## Flusso Operativo
-1. **Ricerca Iniziale**: Usa `request_visura` con `tipo_catasto=None` se non sei sicuro di cercare terreni o fabbricati.
-2. **Verifica Stato**: Usa `get_visura_result` finché la richiesta non è completata.
+1. **Ricerca Iniziale**: Usa `avvia_ricerca_immobili_o_terreni` con `tipo_catasto=None` se non sei sicuro di cercare terreni o fabbricati.
+2. **Verifica Stato**: Usa `recupera_risultati_ricerca` per attendere passivamente il risultato, o `richiedi_stato_ricerca` per un controllo veloce.
 3. **Analisi Risultati**:
    - Se `tipo_catasto='T'`, solitamente hai già tutte le informazioni.
    - Se `tipo_catasto='F'`, verifica se è necessario un `subalterno` specifico.
-4. **Ricerca Intestati**: Se mancano i proprietari per un'unità immobiliare, usa `request_intestati`.
+4. **Ricerca Intestati**: Se mancano i proprietari per un'unità immobiliare, usa `avvia_ricerca_intestatari`.
 
 ## Errori Comuni
 - **Nomi Province**: Assicurati di usare il nome standard italiano.
-- **Timeout Sessione**: Il sistema potrebbe impiegare alcuni secondi per processare. Esegui sempre il polling di `get_visura_result`.
+- **Timeout Sessione**: Il sistema potrebbe impiegare alcuni minuti per processare le visure. Richiama sempre iterativamente `recupera_risultati_ricerca` se ricevi timeout.

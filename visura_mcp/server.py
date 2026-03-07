@@ -1,7 +1,7 @@
 import os
 import logging
 import httpx
-from typing import Optional
+from typing import Optional, Union
 from fastmcp import FastMCP
 
 # Configure logging
@@ -34,10 +34,16 @@ def get_arazzo_workflows() -> str:
     with open("visura_mcp/docs/arazzo_workflows.yaml", "r") as f:
         return f.read()
 
+@mcp.resource("protocol://docs/mcp_examples")
+def get_mcp_examples() -> str:
+    """Esempi pratici di utilizzo degli strumenti MCP con prompt, parametri e risposte attese."""
+    with open("visura_mcp/docs/mcp_examples.md", "r") as f:
+        return f.read()
+
 # --- Tools ---
 
 @mcp.tool()
-async def request_visura(
+async def avvia_ricerca_immobili_o_terreni(
     provincia: str,
     comune: str,
     foglio: str,
@@ -45,21 +51,7 @@ async def request_visura(
     sezione: Optional[str] = None,
     tipo_catasto: Optional[str] = None
 ) -> str:
-    """
-    Triggers a new cadastral search (visura) on SISTER.
-    
-    Args:
-        provincia: Italian province name (e.g., 'ROMA')
-        comune: Italian municipality name (e.g., 'ROMA')
-        foglio: Cadastral sheet number
-        particella: Cadastral parcel number
-        sezione: Optional cadastral section (use '_' for empty/placeholder if needed)
-        tipo_catasto: 'T' for Terreni (Land), 'F' for Fabbricati (Buildings). 
-                     If omitted, both will be requested.
-    
-    Returns:
-        A confirmation message with the request ID(s).
-    """
+    """Avvia una nuova ricerca catastale (visura) sul portale SISTER per foglio e particella. Se tipo_catasto è omesso vengono richiesti sia Terreni ('T') che Fabbricati ('F')."""
     payload = {
         "provincia": provincia,
         "comune": comune,
@@ -75,23 +67,15 @@ async def request_visura(
             response.raise_for_status()
             data = response.json()
             ids = ", ".join(data.get("request_ids", []))
-            return f"Visura requested successfully. Request IDs: {ids}. Status: {data.get('status')}."
+            return f"Ricerca avviata. Request IDs: {ids}. Status: {data.get('status')}. Usa recupera_risultati_ricerca per attendere il risultato."
         except httpx.HTTPStatusError as e:
             return f"API Error: {e.response.text}"
         except Exception as e:
             return f"Error: {str(e)}"
 
 @mcp.tool()
-async def get_visura_result(request_id: str) -> str:
-    """
-    Retrieves the result of a previously triggered visura.
-    
-    Args:
-        request_id: The ID returned by request_visura (e.g., 'req_T_123456789')
-    
-    Returns:
-        JSON string containing the visura data or current status.
-    """
+async def richiedi_stato_ricerca(request_id: str) -> str:
+    """Recupera lo stato corrente di una ricerca catastale. Restituisce 'processing' se ancora in corso, 'completed' con i dati o 'error'. Per un'attesa passiva usa recupera_risultati_ricerca."""
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(f"{VISURA_API_URL}/visura/{request_id}", timeout=30.0)
@@ -104,38 +88,50 @@ async def get_visura_result(request_id: str) -> str:
             return f"Error: {str(e)}"
 
 @mcp.tool()
-async def request_intestati(
+async def recupera_risultati_ricerca(
+    request_id: str,
+    timeout_secondi: int = 30
+) -> str:
+    """Aspetta il completamento di una ricerca (immobili o intestatari) e restituisce il risultato finale.
+    Funziona con qualsiasi request_id restituito da avvia_ricerca_immobili_o_terreni o avvia_ricerca_intestatari.
+    Esegue polling ogni 10 secondi (fisso, per non sovraccaricare il portale SISTER).
+    IMPORTANTE: se il risultato non e' ancora disponibile entro il timeout, restituisce un messaggio
+    di timeout — NON e' un errore. In quel caso l'agente deve richiamare recupera_risultati_ricerca con lo stesso
+    request_id per continuare ad aspettare. Le visure possono richiedere 1-3 minuti."""
+    import asyncio, time
+    POLL_INTERVAL = 10  # secondi fissi — non modificare per evitare traffico eccessivo su SISTER
+    deadline = time.monotonic() + timeout_secondi
+    async with httpx.AsyncClient() as client:
+        while time.monotonic() < deadline:
+            try:
+                response = await client.get(f"{VISURA_API_URL}/visura/{request_id}", timeout=30.0)
+                response.raise_for_status()
+                data = response.json()
+                if data.get("status") != "processing":
+                    return str(data)
+            except Exception as e:
+                return f"Error durante il polling: {str(e)}"
+            await asyncio.sleep(POLL_INTERVAL)
+    return f"Timeout: la ricerca '{request_id}' non e' ancora disponibile. Riprova con recupera_risultati_ricerca."
+
+@mcp.tool()
+async def avvia_ricerca_intestatari(
     provincia: str,
     comune: str,
     foglio: str,
     particella: str,
     tipo_catasto: str,
-    subalterno: Optional[str] = None,
+    subalterno: Optional[Union[str, int]] = None,
     sezione: Optional[str] = None
 ) -> str:
-    """
-    Triggers a specific search for property owners (intestati).
-    Necessary for Fabbricati (Buildings) if you need the owners of a specific subalterno.
-    
-    Args:
-        provincia: Italian province name
-        comune: Italian municipality name
-        foglio: Cadastral sheet number
-        particella: Cadastral parcel number
-        tipo_catasto: 'T' for Terreni, 'F' for Fabbricati
-        subalterno: Required for Fabbricati.
-        sezione: Optional cadastral section.
-    
-    Returns:
-        A confirmation message with the request ID.
-    """
+    """Avvia una ricerca degli intestatari (proprietari) di un immobile specifico. Necessario per i Fabbricati ('F') per ottenere i proprietari di un determinato subalterno. Usa recupera_risultati_ricerca con il request_id restituito per ottenere il risultato."""
     payload = {
         "provincia": provincia,
         "comune": comune,
         "foglio": foglio,
         "particella": particella,
         "tipo_catasto": tipo_catasto,
-        "subalterno": subalterno,
+        "subalterno": str(subalterno) if subalterno is not None else None,
         "sezione": sezione
     }
     
@@ -144,7 +140,7 @@ async def request_intestati(
             response = await client.post(f"{VISURA_API_URL}/visura/intestati", json=payload, timeout=30.0)
             response.raise_for_status()
             data = response.json()
-            return f"Intestati search requested. Request ID: {data.get('request_id')}. Status: {data.get('status')}."
+            return f"Ricerca intestatari avviata. Request ID: {data.get('request_id')}. Status: {data.get('status')}. Usa recupera_risultati_ricerca per attendere il risultato."
         except httpx.HTTPStatusError as e:
             return f"API Error: {e.response.text}"
         except Exception as e:

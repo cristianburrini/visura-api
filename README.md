@@ -133,10 +133,8 @@ Per Docker:
 
 ## Avvio rapido
 
-### Con Docker (raccomandato)
+### Con Docker (produzione)
 
-### Con Docker (Standalone API)
- 
 ```bash
 git clone https://github.com/zornade/visura-api.git
 cd visura-api
@@ -154,7 +152,7 @@ curl http://localhost:8000/health
  
 > **Nota**: Per utilizzare il server MCP (Model Context Protocol), consulta la documentazione specifica nella cartella [visura_mcp/](visura_mcp/README.md).
 
-### Installazione manuale
+### Installazione manuale (per sviluppo)
 
 ```bash
 git clone https://github.com/zornade/visura-api.git
@@ -167,7 +165,7 @@ pip install -r requirements.txt
 playwright install chromium
 
 cp .env.example .env
-# Modifica .env con le tue credenziali SPID
+# Modifica .env con le tue credenziali SPID (vedi sezione Configurazione)
 
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```

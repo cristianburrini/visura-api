@@ -6,6 +6,7 @@ Questa directory contiene il server Model Context Protocol (MCP) per Visura API.
 - [Produzione (Docker)](#produzione-docker)
 - [Sviluppo (Locale)](#sviluppo-locale)
 - [Test](#test)
+- [Esempi di Utilizzo](docs/mcp_examples.md)
 
 ---
 
@@ -34,7 +35,7 @@ In Docker, il server MCP si connette all'API tramite la variabile `VISURA_API_UR
 - **Default**: `http://visure-api:8000` (risolve l'IP del container API nella stessa rete).
 - **Custom**: Modifica la variabile nel `docker-compose.yaml` se l'API ha un indirizzo diverso.
 
-**Endpoint SSE**: `http://localhost:8001/sse`
+**Endpoint**: `http://localhost:8001/mcp`
 
 ---
 
@@ -71,7 +72,7 @@ python server.py
 
 **Modalità SSE (Via FastMCP CLI):**
 ```bash
-fastmcp run server.py --transport sse --port 8001
+fastmcp run server.py --transport streamable-http --port 8001
 ```
 
 ---

@@ -23,5 +23,5 @@ USER appuser
 # Expose MCP port
 EXPOSE 8001
 
-# Default command for MCP server (SSE mode)
-CMD ["fastmcp", "run", "visura_mcp/server.py", "--transport", "sse", "--port", "8001", "--host", "0.0.0.0"]
+# Default command for MCP server (streamable-http mode)
+CMD ["fastmcp", "run", "visura_mcp/server.py", "--transport", "streamable-http", "--port", "8001", "--host", "0.0.0.0"]

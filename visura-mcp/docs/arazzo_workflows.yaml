@@ -1,0 +1,58 @@
+arazzo: 1.0.0
+info:
+  title: Visura Workflows
+  version: 1.0.0
+  description: Multi-step journeys for SISTER cadastral searches.
+sourceDescription:
+  - name: visura-api
+    type: openapi
+    url: ./openapi_spec.yaml
+workflows:
+  - workflowId: search_property_and_owners
+    description: A complete journey to find a property and its owners.
+    inputs:
+      type: object
+      properties:
+        provincia: {type: string}
+        comune: {type: string}
+        foglio: {type: string}
+        particella: {type: string}
+    steps:
+      - stepId: request_initial_search
+        operationId: visura-api.richiedi_visura
+        parameters:
+          - name: provincia
+            value: $inputs.provincia
+          - name: comune
+            value: $inputs.comune
+          - name: foglio
+            value: $inputs.foglio
+          - name: particella
+            value: $inputs.particella
+        successCriteria:
+          - condition: $statusCode == 200
+      - stepId: poll_result
+        operationId: visura-api.ottieni_visura
+        parameters:
+          - name: request_id
+            value: $steps.request_initial_search.outputs.request_ids[0]
+        successCriteria:
+          - condition: $outputs.status == 'completed'
+      - stepId: handle_fabbricati_owners
+        description: If it's a building and owners are missing, request specific subalterno.
+        operationId: visura-api.richiedi_intestati_immobile
+        parameters:
+          - name: provincia
+            value: $inputs.provincia
+          - name: comune
+            value: $inputs.comune
+          - name: foglio
+            value: $inputs.foglio
+          - name: particella
+            value: $inputs.particella
+          - name: tipo_catasto
+            value: 'F'
+          - name: subalterno
+            value: $steps.poll_result.outputs.data.immobili[0].subalterno
+        successCriteria:
+          - condition: $statusCode == 200

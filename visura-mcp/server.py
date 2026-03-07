@@ -14,8 +14,27 @@ mcp = FastMCP("Visura")
 # API Configuration
 VISURA_API_URL = os.getenv("VISURA_API_URL", "http://localhost:8000")
 
-@mcp.tool()
-async def request_visura(
+# --- Resources ---
+
+@mcp.resource("docs/api_guide")
+def get_api_guide() -> str:
+    """Detailed human-readable guidance on interpreting cadastral data."""
+    with open("visura-mcp/docs/api_guide.md", "r") as f:
+        return f.read()
+
+@mcp.resource("docs/openapi_spec")
+def get_openapi_spec() -> str:
+    """The machine-readable OpenAPI definition of the underlying Visura API."""
+    with open("visura-mcp/docs/openapi_spec.yaml", "r") as f:
+        return f.read()
+
+@mcp.resource("docs/arazzo_workflows")
+def get_arazzo_workflows() -> str:
+    """An Arazzo Specification describing the standard 'journeys'."""
+    with open("visura-mcp/docs/arazzo_workflows.yaml", "r") as f:
+        return f.read()
+
+# --- Tools ---
     provincia: str,
     comune: str,
     foglio: str,

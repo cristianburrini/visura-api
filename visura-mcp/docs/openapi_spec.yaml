@@ -1,0 +1,69 @@
+openapi: 3.0.0
+info:
+  title: Visura API
+  version: 0.1.0
+  description: API for automated cadastral data extraction from SISTER.
+paths:
+  /visura:
+    post:
+      summary: Request a visura
+      operationId: richiedi_visura
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisuraInput'
+      responses:
+        '200':
+          description: Successful request
+  /visura/{request_id}:
+    get:
+      summary: Get visura result
+      operationId: ottieni_visura
+      parameters:
+        - name: request_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response
+  /visura/intestati:
+    post:
+      summary: Request property owners
+      operationId: richiedi_intestati_immobile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisuraIntestatiInput'
+      responses:
+        '200':
+          description: Successful request
+
+components:
+  schemas:
+    VisuraInput:
+      type: object
+      required: [provincia, comune, foglio, particella]
+      properties:
+        provincia: {type: string}
+        comune: {type: string}
+        foglio: {type: string}
+        particella: {type: string}
+        sezione: {type: string}
+        tipo_catasto: {type: string, enum: [T, F]}
+    VisuraIntestatiInput:
+      type: object
+      required: [provincia, comune, foglio, particella, tipo_catasto]
+      properties:
+        provincia: {type: string}
+        comune: {type: string}
+        foglio: {type: string}
+        particella: {type: string}
+        tipo_catasto: {type: string, enum: [T, F]}
+        subalterno: {type: string}
+        sezione: {type: string}

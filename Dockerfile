@@ -50,9 +50,11 @@ RUN playwright install chromium
 # Copy the rest of the application code
 COPY --chown=appuser:appuser . .
 
-# Expose ports (API: 8000, MCP: 8001)
+# Expose port (API: 8000)
 EXPOSE 8000
-EXPOSE 8001
 
-# Default command
+# Entrypoint to setup environment
 ENTRYPOINT ["./entrypoint.sh"]
+
+# Default command to run the API
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

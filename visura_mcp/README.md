@@ -1,62 +1,86 @@
 # Server MCP Visura
 
-Questa directory contiene il server Model Context Protocol (MCP) per Visura API. Permette agli agenti AI di interagire con il sistema catastale italiano (SISTER) in modo strutturato e documentato.
+Questa directory contiene il server Model Context Protocol (MCP) per Visura API. Permette agli agenti AI di interagire con il sistema catastale italiano (SISTER) in modo strutturato.
 
-## Funzionalità
-- **Tool**: Esegue visure, recupera risultati e cerca intestatari di immobili.
-- **Risorse**: Documentazione di alta qualità, incluse specifiche OpenAPI e workflow Arazzo per orchestrazioni complesse.
-- **Prompt**: Prompt predefiniti per aiutare gli agenti a iniziare correttamente.
+## Indice
+- [Produzione (Docker)](#produzione-docker)
+- [Sviluppo (Locale)](#sviluppo-locale)
+- [Test](#test)
 
-## Integrazione Docker
-Il servizio può essere eseguito interamente tramite Docker. 
+---
 
-### Avvio di un container docker che espone sia l'API che il server MCP
-Se si vuole esporre il servizio ad automatizioni tradizionali ed ad agenti AI contemporaneamente, si può avviare un container docker che espone sia l'API (porta 8000) che il server MCP (porta 8001):
+## Produzione (Docker)
 
+L'utilizzo di Docker è il modo raccomandato per eseguire il sistema in produzione. Il server MCP è un'immagine standalone leggera (`python:3.11-slim`).
+
+### Avvio con Docker Compose
+Eseguire i comandi dalla cartella `visura_mcp/`:
+
+#### 1. API + MCP (Sistema completo)
+Per avviare entrambi i servizi:
 ```bash
-docker-compose up
-```
-L'MCP server sarà accessibile via SSE su `http://localhost:8001/mcp/sse`.
-
-
-### Avvio del server MCP 
-Il server MCP può essere avviato in modalità remota (SSE) senza esporre l'API pubblicamente. In questa modalita l'MCP server accede ad una instanza privata e colocata dell'API. 
-
-```bash
-docker-compose run -e APP_MODE=MCP visura-api
-```
-Per cambiare la porta del server MCP:
-
-```bash
-docker-compose run -e APP_MODE=MCP -p 8001:<target_port> visura-api
+docker-compose up -d
 ```
 
+#### 2. Solo MCP
+Se la Visura API è già in esecuzione altrove (es. su un altro server):
+```bash
+docker-compose up -d visure-mcp
+```
 
-## Sviluppo in locale (senza Docker)
-### Installazione 
-1. Installa le dipendenze:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Configura l'ambiente:
-   Assicurati che `VISURA_API_URL` sia impostato sull'indirizzo della tua istanza di `visura-api` in esecuzione.
+### Configurazione Connessione
+In Docker, il server MCP si connette all'API tramite la variabile `VISURA_API_URL` definita nel file `docker-compose.yaml`:
 
-### Avvio del Server
-Puoi eseguire il server in modalità stdio (per uso locale) o in modalità SSE (per uso remoto).
+- **Default**: `http://visure-api:8000` (risolve l'IP del container API nella stessa rete).
+- **Custom**: Modifica la variabile nel `docker-compose.yaml` se l'API ha un indirizzo diverso.
 
-### Modalità Stdio
+**Endpoint SSE**: `http://localhost:8001/sse`
+
+---
+
+## Sviluppo (Locale)
+
+Configurazione per lo sviluppo o test rapido senza Docker.
+
+### 1. Installazione
+Dalla cartella `visura_mcp/`:
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Configurazione Connessione
+Prima di avviare il server, esporta l'indirizzo della tua istanza di Visura API:
+
+```bash
+# Se l'API gira localmente su porta 8000
+export VISURA_API_URL=http://localhost:8000
+
+# Oppure se l'API è in cloud/remoto
+export VISURA_API_URL=https://tua-api-visure.com
+```
+
+### 3. Avvio del Server
+Puoi avviare il server in modalità **Stdio** (comunicazione diretta) o **SSE** (HTTP):
+
+**Modalità Stdio (Default per debugging):**
 ```bash
 python server.py
 ```
 
-### Modalità SSE (Remoto)
-Usa la configurazione Docker con `APP_MODE=MCP`. Vedi le istruzioni Docker sotto.
+**Modalità SSE (Via FastMCP CLI):**
+```bash
+fastmcp run server.py --transport sse --port 8001
+```
 
-### MCP Inspector Test
-Usa lo script fornito:
+---
+
+## Test
+
+### MCP Inspector
+Per testare tool e risorse durante lo sviluppo:
 ```bash
 ./scripts/test_mcp.sh
 ```
-Questo avvierà l'MCP Inspector per testare i tool e le risorse.
-
-
+Questo avvierà l'interfaccia di test ufficiale per verificare il comportamento del server.

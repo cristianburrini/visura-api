@@ -52,7 +52,7 @@ Entrambe le richieste vengono accodate ed eseguite sequenzialmente su un singolo
 - **Keep-alive** — la sessione viene mantenuta attiva con un light keep-alive ogni 30 secondi e un refresh profondo ogni 5 minuti
 - **Graceful shutdown** — su `SIGINT`/`SIGTERM` il servizio effettua il logout dal portale prima di chiudere il browser
 - **Logging HTML completo** — ogni pagina visitata dal browser viene salvata su disco per debug e audit
-- **Docker-ready** — immagine pronta con tutte le dipendenze di sistema per Chromium headless
+- **Docker-ready** — immagine API basata su Chromium headless
 
 ### Compatibilità SPID
 
@@ -105,9 +105,8 @@ Client HTTP
 | `main.py` | Applicazione FastAPI: endpoint, modelli Pydantic, `BrowserManager`, `VisuraService`, lifespan |
 | `utils.py` | Automazione browser: `login()`, `logout()`, `run_visura()`, `run_visura_immobile()`, `extract_all_sezioni()`, `PageLogger`, `parse_table()` |
 | `auth/` | Package contenente le strategie di autenticazione (CIE, Sielte) |
-| `Dockerfile` | Immagine basata su `python:3.11-slim` con dipendenze per Chromium |
-| `docker-compose.yaml` | Orchestrazione con healthcheck, volumi per log, restart automatico |
-| `requirements.txt` | Dipendenze Python |
+| `Dockerfile` | Immagine API basata su `python:3.11-slim` con dipendenze per Chromium |
+| `requirements.txt` | Dipendenze Python (API) |
 | `pyproject.toml` | Metadati di progetto e dipendenze opzionali di sviluppo |
 
 ---
@@ -136,18 +135,24 @@ Per Docker:
 
 ### Con Docker (raccomandato)
 
+### Con Docker (Standalone API)
+ 
 ```bash
 git clone https://github.com/zornade/visura-api.git
 cd visura-api
-
+ 
 cp .env.example .env
 # Modifica .env con le tue credenziali SPID
-
-docker-compose up -d
-
-# Verifica che il servizio sia attivo
+ 
+# Costruisci e avvia l'immagine API
+docker build -t visura-api .
+docker run -d -p 8000:8000 --env-file .env --name visura-api visura-api
+ 
+# Verifica che l'API sia attiva
 curl http://localhost:8000/health
 ```
+ 
+> **Nota**: Per utilizzare il server MCP (Model Context Protocol), consulta la documentazione specifica nella cartella [visura_mcp/](visura_mcp/README.md).
 
 ### Installazione manuale
 
@@ -704,14 +709,6 @@ ruff check .      # controllo linting
 
 ```bash
 python -m pytest test_*.py -v
-```
-
-### Docker
-
-```bash
-docker-compose up --build         # build e avvio
-docker-compose logs -f             # segui i log
-docker-compose down                # stop e rimozione container
 ```
 
 ### Linee guida

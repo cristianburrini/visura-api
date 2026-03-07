@@ -112,15 +112,30 @@ async def login(page: Page):
 
         logger.info("[LOGIN] Cerco servizio SISTER...")
         ricerca_box = page.get_by_role("textbox", name="Cerca il servizio")
-        try:
-            await ricerca_box.wait_for(state="visible", timeout=timeout_2fa * 1000)
-        except Exception as e:
-            # Check immediato per sessione bloccata o errore redirect
+        
+        start_wait = time.time()
+        found = False
+        while (time.time() - start_wait) < timeout_2fa:
+            # Check per redirect anomalo a logout
+            if "cortesia_logout" in page.url:
+                logger.error("[LOGIN] Rilevato redirect a cortesia_logout!")
+                raise Exception("Rilevato redirect anomalo a cortesia_logout (Sessione invalidata dal server)")
+            
+            try:
+                await ricerca_box.wait_for(state="visible", timeout=2000)
+                found = True
+                break
+            except Exception:
+                pass
+            
+            # Check per utente già in sessione
             content = await page.content()
             if "Utente gia' in sessione" in content or "error_locked.jsp" in page.url:
                 raise Exception("Utente già in sessione su un'altra postazione (Rilevato all'ingresso)")
+                
+        if not found:
             logger.debug(f"[LOGIN][DEBUG] Timeout ricerca box. URL attuale: {page.url}")
-            raise e
+            raise Exception(f"Timeout ricerca box scaduto. URL attuale: {page.url}")
 
         await page_logger.log(page, "before_sister_search")
         await ricerca_box.click()

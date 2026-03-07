@@ -165,18 +165,20 @@ class BrowserManager:
                 except Exception as e:
                     logger.warning(f"Errore chiudendo vecchia pagina: {e}")
 
-            for attempt in range(2):
+            for attempt in range(3):
                 try:
                     page = await self.context.new_page()
                     await login(page)
                     break
                 except Exception as e:
+                    error_str = str(e).lower()
                     if (
-                        "Target page, context or browser has been closed" in str(e)
-                        or "Browser closed" in str(e)
-                        or "Target closed" in str(e)
-                    ) and attempt == 0:
-                        logger.warning(f"Contesto chiuso ({e}), reinizializzazione in corso... (tentativo {attempt+1})")
+                        "target page, context or browser has been closed" in error_str
+                        or "browser closed" in error_str
+                        or "target closed" in error_str
+                        or "cortesia_logout" in error_str
+                    ) and attempt < 2:
+                        logger.warning(f"Errore al login (logout di cortesia o browser chiuso) ({e}), reinizializzazione in corso... (tentativo {attempt+1}/3)")
                         await self.initialize()
                     else:
                         raise

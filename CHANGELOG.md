@@ -13,6 +13,10 @@ e questo progetto aderisce al [Versionamento Semantico](https://semver.org/lang/
   - Implementazione modulare per i provider `SIELTE` e `CIE`.
   - Configurazione provider tramite variabile `AUTH_PROVIDER`.
   - Nuova variabile d'ambiente `2FA_TIMEOUT_SECONDS` per la gestione del timeout notifiche 2FA.
+- **Supporto MCP (Model Context Protocol)**:
+  - Implementato server MCP per consentire l'interazione con agenti AI.
+  - Inclusi tool per visure, risorse (OpenAPI, Arazzo) e prompt predefiniti.
+  - Supporto per Docker con modalità MCP dedicata.
 - Licenza GPL v3
 - File CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md
 - Configurazione CI con GitHub Actions

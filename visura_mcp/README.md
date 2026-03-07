@@ -1,34 +1,49 @@
-# Visura MCP Server
+# Server MCP Visura
 
-This directory contains the Model Context Protocol (MCP) server for the Visura API. It allows AI agents to interact with the Italian cadastral system (SISTER) in a structured and documented way.
+Questa directory contiene il server Model Context Protocol (MCP) per Visura API. Permette agli agenti AI di interagire con il sistema catastale italiano (SISTER) in modo strutturato e documentato.
 
-## Features
-- **Tools**: Perform visuras, retrieve results, and search for property owners.
-- **Resources**: High-quality documentation, including OpenAPI specs and Arazzo workflows for complex orchestration.
-- **Prompts**: Pre-defined prompts to help agents start their journey correctly.
+## Funzionalità
+- **Tool**: Esegue visure, recupera risultati e cerca intestatari di immobili.
+- **Risorse**: Documentazione di alta qualità, incluse specifiche OpenAPI e workflow Arazzo per orchestrazioni complesse.
+- **Prompt**: Prompt predefiniti per aiutare gli agenti a iniziare correttamente.
 
-## Installation
-1. Install dependencies:
+## Installazione
+1. Installa le dipendenze:
    ```bash
    pip install -r requirements.txt
    ```
-2. Configure environment:
-   Make sure `VISURA_API_URL` is set to the location of your running `visura-api`.
+2. Configura l'ambiente:
+   Assicurati che `VISURA_API_URL` sia impostato sull'indirizzo della tua istanza di `visura-api` in esecuzione.
 
-## Running the Server
-You can run the server in stdio mode (for local use) or SSE mode (for remote use).
+## Avvio del Server
+Puoi eseguire il server in modalità stdio (per uso locale) o in modalità SSE (per uso remoto).
 
-### Stdio Mode
+### Modalità Stdio
 ```bash
 python server.py
 ```
 
-### SSE Mode (Remote)
-Use the Docker configuration with `APP_MODE=MCP`.
+### Modalità SSE (Remoto)
+Usa la configurazione Docker con `APP_MODE=MCP`. Vedi le istruzioni Docker sotto.
 
-## Testing
-Use the provided script:
+## Integrazione Docker
+Il servizio può essere eseguito interamente tramite Docker. Per avviare solo il server MCP:
+
+```bash
+docker-compose run -e APP_MODE=MCP -p 8001:8001 visura-api
+```
+
+Oppure, per avviare sia l'API che il server MCP:
+
+```bash
+docker-compose up
+```
+
+In modalità MCP, il server sarà accessibile via SSE su `http://localhost:8001/mcp/sse`.
+
+## Test
+Usa lo script fornito:
 ```bash
 ./scripts/test_mcp.sh
 ```
-This will launch the MCP Inspector.
+Questo avvierà l'MCP Inspector per testare i tool e le risorse.

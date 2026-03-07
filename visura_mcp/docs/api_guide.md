@@ -1,29 +1,29 @@
-# Visura API & SISTER Guide for Agents
+# Guida Visura API & SISTER per Agenti
 
-This guide helps you understand how the Italian Cadastral system (SISTER) works and how to use the Visura API tools effectively.
+Questa guida aiuta a capire come funziona il sistema catastale italiano (SISTER) e come utilizzare efficacemente i tool di Visura API.
 
-## Core Concepts
+## Concetti Base
 
-### Cadastral Identifiers
-- **Provincia (Province)**: The administrative province (e.g., ROMA, MILANO). Usually 2 or 4 characters or the full name.
-- **Comune (Municipality)**: The specific town.
-- **Foglio (Sheet)**: A portion of the municipal territory. Always required.
-- **Particella (Parcel)**: A specific plot of land or external perimeter of a building. Always required.
-- **Subalterno (Sub-unit)**: Required for **Fabbricati** (Buildings) to identify a specific apartment or office. NOT used for **Terreni** (Land).
-- **Sezione (Section)**: Some municipalities are divided into sections (e.g., 'A', 'B'). Use if known, otherwise omit.
+### Identificativi Catastali
+- **Provincia**: La provincia amministrativa (es. ROMA, MILANO). Solitamente 2 o 4 caratteri o il nome completo.
+- **Comune**: Il comune specifico.
+- **Foglio**: Una porzione del territorio comunale. Sempre richiesto.
+- **Particella**: Una specifica porzione di terreno o il perimetro esterno di un edificio. Sempre richiesto.
+- **Subalterno**: Richiesto per i **Fabbricati** per identificare uno specifico appartamento o ufficio. NON usato per i **Terreni**.
+- **Sezione**: Alcuni comuni sono divisi in sezioni (es. 'A', 'B'). Usa se nota, altrimenti ometti.
 
-### Search Types
-1. **Terreni (T)**: Search for land. Returns owners (intestati) directly in the visura result.
-2. **Fabbricati (F)**: Search for buildings. If you look for a parcel with many subalterni, you might receive a list of properties. You then need to use `request_intestati` with a specific `subalterno` to get the owners.
+### Tipi di Ricerca
+1. **Terreni (T)**: Ricerca per terreni. Restituisce i proprietari (intestati) direttamente nel risultato della visura.
+2. **Fabbricati (F)**: Ricerca per edifici. Se cerchi una particella con molti subalterni, potresti ricevere una lista di immobili. Dovrai quindi usare `request_intestati` con un `subalterno` specifico per ottenere i proprietari.
 
-## Multi-step Journey
-1. **Initial Search**: Use `request_visura` with `tipo_catasto=None` to check both Land and Buildings if you are unsure.
-2. **Check Status**: Use `get_visura_result` until success.
-3. **Parse Results**:
-   - If `tipo_catasto='T'`, you usually have everything.
-   - If `tipo_catasto='F'`, check if you need a specific `subalterno`.
-4. **Owner Search**: If owners are missing for a building unit, use `request_intestati`.
+## Flusso Operativo
+1. **Ricerca Iniziale**: Usa `request_visura` con `tipo_catasto=None` se non sei sicuro di cercare terreni o fabbricati.
+2. **Verifica Stato**: Usa `get_visura_result` finché la richiesta non è completata.
+3. **Analisi Risultati**:
+   - Se `tipo_catasto='T'`, solitamente hai già tutte le informazioni.
+   - Se `tipo_catasto='F'`, verifica se è necessario un `subalterno` specifico.
+4. **Ricerca Intestati**: Se mancano i proprietari per un'unità immobiliare, usa `request_intestati`.
 
-## Common Pitfalls
-- **Province Names**: Ensure you use the standard Italian name.
-- **Session Timeout**: The system might take a few seconds to process. Always poll `get_visura_result`.
+## Errori Comuni
+- **Nomi Province**: Assicurati di usare il nome standard italiano.
+- **Timeout Sessione**: Il sistema potrebbe impiegare alcuni secondi per processare. Esegui sempre il polling di `get_visura_result`.

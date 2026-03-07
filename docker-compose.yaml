@@ -1,15 +1,19 @@
 services:
-  visure-service:
-    build: .
+  visure-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visure-api
     ports:
       - "8000:8000"
     environment:
+      - APP_MODE=API
       - PYTHONUNBUFFERED=1
-      - DISPLAY=:99
+      - PYTHONPATH=.
     env_file:
       - .env
     volumes:
-      - ./:/app
+      - .:/app
       - ./logs:/app/logs:rw
     restart: unless-stopped
     healthcheck:
@@ -17,6 +21,5 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    # Per debugging, rimuovi in produzione
     stdin_open: true
     tty: true

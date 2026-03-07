@@ -1,6 +1,11 @@
 FROM python:3.11-slim
 
-# Installa dipendenze di sistema per Playwright
+# Prevent Python from writing .pyc files and enable unbuffered logging
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
+
+# Install system dependencies for Playwright and modern UI browsers
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -24,35 +29,30 @@ RUN apt-get update && apt-get install -y \
     libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Crea directory di lavoro
+# Create working directory
 WORKDIR /app
 
-# Copia e installa dipendenze Python
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copia il codice dell'applicazione
-COPY . .
-
-# Installa browser Playwright come root
-RUN playwright install chromium
-
-# Crea un utente non-root per sicurezza e configura directory
+# Create a non-root user for security
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app/logs && \
     chown -R appuser:appuser /app
 
+# Copy requirements first to leverage Docker layer caching
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Switch to non-root user
 USER appuser
 
-# Installa browser Playwright come appuser
+# Install Playwright browser (Chromium only) once as appuser
 RUN playwright install chromium
 
-# Espone la porta
+# Copy the rest of the application code
+COPY --chown=appuser:appuser . .
+
+# Expose ports (API: 8000, MCP: 8001)
 EXPOSE 8000
+EXPOSE 8001
 
-# Variabili d'ambiente
-ENV PYTHONUNBUFFERED=1
-ENV PLAYWRIGHT_BROWSERS_PATH=/home/appuser/.cache/ms-playwright
-
-# Comando di avvio
+# Default command
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

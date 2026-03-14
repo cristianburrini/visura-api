@@ -39,6 +39,7 @@ dependencies = [
     "httpx>=0.25.0",
     "psycopg2-binary",
     "pymysql",
+    "fastmcp",
 ]
 
 [project.optional-dependencies]

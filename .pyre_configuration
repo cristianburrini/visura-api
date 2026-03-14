@@ -1,0 +1,11 @@
+{
+  "source_directories": [
+    "."
+  ],
+  "search_path": [
+    ".venv/lib/python3.10/site-packages"
+  ],
+  "exclude": [
+    "**/__pycache__/.*"
+  ]
+}

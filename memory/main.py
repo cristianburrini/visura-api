@@ -18,7 +18,7 @@ from memory.database import (
     CatalogComune, CatalogParcel, ScheduledVisura
 )
 from memory.transformer import normalize_visura_data
-from memory.catalog_manager import reload_catalog
+from memory.catalog_manager import reload_catalog, validate_and_canonicalize_params
 
 # Configuration
 UPSTREAM_API_URL = os.getenv("UPSTREAM_API_URL", "http://visure-api:8000")
@@ -134,7 +134,7 @@ def is_already_done(db: Session, target: Dict[str, Any], scenario: int) -> bool:
         
     return False
 
-async def get_upstream_health():
+async def get_upstream_health() -> tuple[bool, Optional[Dict[str, Any]]]:
     """Checks the health of the upstream visure-api."""
     try:
         async with httpx.AsyncClient() as client:
@@ -142,73 +142,9 @@ async def get_upstream_health():
             return response.status_code == 200, response.json()
     except Exception:
         return False, None
-
-def get_levenshtein_suggestions(db: Session, table, column, value, limit=3):
-    """Simple suggestion helper using ILIKE prefix match as a fallback."""
-    query = db.query(column).filter(column.ilike(f"%{value}%")).distinct().limit(limit)
-    return [r[0] for r in query.all()]
-
-def validate_and_canonicalize_params(db: Session, params: Dict[str, Any]):
-    """
-    Validates visura parameters against the catalog.
-    If valid, returns (canonical_params, upstream_params).
-    If invalid, raises HTTPException 400 with details.
-    """
-    # 1. Resolve Comune
-    comune_name = params.get("comune", "").strip().upper()
-    prov_code = params.get("provincia", "").strip().upper()
     
-    cat_comune = db.query(CatalogComune).filter(
-        CatalogComune.denominazione == comune_name,
-        CatalogComune.sigla_provincia == prov_code
-    ).first()
-    
-    if not cat_comune:
-        # Check if maybe they used a 4-letter code instead of name
-        cat_comune = db.query(CatalogComune).filter(CatalogComune.codice_catastale == comune_name).first()
+    return False, None
 
-    if not cat_comune:
-        suggestions = get_levenshtein_suggestions(db, CatalogComune, CatalogComune.denominazione, comune_name)
-        raise HTTPException(status_code=400, detail={
-            "error": "Comune non trovato nel catalogo",
-            "invalid_fields": ["comune", "provincia"],
-            "suggestions": suggestions
-        })
-
-    # 2. Check Parcel availability
-    foglio = params.get("foglio", "").strip().lstrip('0') or "0"
-    particella = params.get("particella", "").strip().lstrip('0') or "0"
-    sezione = params.get("sezione")
-    if sezione == "" or sezione == "_":
-        sezione = None
-        
-    # Query parcel catalog - no more zfill(4)
-    exists = db.query(CatalogParcel).filter(
-        CatalogParcel.codice_comune == cat_comune.codice_catastale,
-        CatalogParcel.foglio == foglio,
-        CatalogParcel.particella == particella
-    )
-    if sezione:
-        exists = exists.filter(CatalogParcel.sezione == sezione)
-    else:
-        exists = exists.filter(CatalogParcel.sezione.is_(None))
-        
-    if not exists.first():
-        raise HTTPException(status_code=400, detail={
-            "error": "Foglio o Particella non validi per questo comune",
-            "invalid_fields": ["foglio", "particella"],
-            "hints": f"Verificato per comune {cat_comune.denominazione} ({cat_comune.codice_catastale})"
-        })
-
-    # 3. Construct Upstream Params (with Overrides)
-    upstream_params = params.copy()
-    upstream_params["comune"] = cat_comune.denominazione_upstream or cat_comune.denominazione
-    upstream_params["provincia"] = cat_comune.provincia_upstream or cat_comune.sigla_provincia
-    
-    if cat_comune.regione_upstream:
-        upstream_params["regione"] = cat_comune.regione_upstream
-
-    return params, upstream_params
 
 
 

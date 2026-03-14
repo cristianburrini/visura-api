@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 import memory.database as database
 from memory.database import Base, get_db
 from memory.main import app
+from memory.tests.seed_data import seed_test_catalog
 
 # Use a file for tests to avoid thread issues with in-memory and StaticPool
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_api.db"
@@ -26,6 +27,7 @@ database.SessionLocal = TestingSessionLocal
 def db():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
+    seed_test_catalog(db)
     try:
         yield db
     finally:

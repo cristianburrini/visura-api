@@ -85,3 +85,13 @@ Per testare tool e risorse durante lo sviluppo:
 ./scripts/test_mcp.sh
 ```
 Questo avvierà l'interfaccia di test ufficiale per verificare il comportamento del server.
+
+---
+
+### Strumenti Disponibili
+L'MCP espone diversi strumenti per gli agenti:
+- **Visura**: `avvia_ricerca_immobili_o_terreni`, `avvia_ricerca_intestatari`, `recupera_risultati_ricerca`.
+- **Catalogo**: `mcp_visure_search_comune`, `mcp_visure_list_parcels`, `mcp_visure_reload_catalog`.
+- **Utility**: `mcp_visure_get_health`.
+
+Vedi [Esempi di Utilizzo](docs/mcp_examples.md) per i dettagli.

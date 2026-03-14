@@ -27,3 +27,17 @@ Questa guida aiuta a capire come funziona il sistema catastale italiano (SISTER)
 ## Errori Comuni
 - **Nomi Province**: Assicurati di usare il nome standard italiano.
 - **Timeout Sessione**: Il sistema potrebbe impiegare alcuni minuti per processare le visure. Richiama sempre iterativamente `recupera_risultati_ricerca` se ricevi timeout.
+
+## Catalog & Validazione
+
+Il sistema include un catalogo statico di comuni, fogli e particelle per migliorare la precisione delle ricerche.
+
+### Ricerca Comuni
+Usa `mcp_visure_search_comune` per trovare il **Codice Catastale** corretto di un comune. Questo codice è fondamentale per l'accuratezza della visura.
+
+### Validazione Input
+Le richieste inviate a `avvia_ricerca_immobili_o_terreni` vengono validate automaticamente contro il catalogo:
+- Se il comune non esiste: Errore 400.
+- Se il foglio o la particella non sono censiti per quel comune: Errore 400.
+
+Usa `mcp_visure_list_parcels` per verificare quali fogli e particelle sono validi per un determinato comune prima di avviare una ricerca costosa sul portale SISTER.

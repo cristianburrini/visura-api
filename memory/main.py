@@ -11,8 +11,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from memory.database import QueryCache, get_db, init_db, Immobile, Soggetto, Titolarita
+from memory.database import QueryCache, get_db, init_db, Immobile, Soggetto, Titolarita, CatalogComune, CatalogParcel
 from memory.transformer import normalize_visura_data
+from memory.catalog_manager import reload_catalog
+from sqlalchemy import or_, func
 
 # Configuration
 UPSTREAM_API_URL = os.getenv("UPSTREAM_API_URL", "http://visure-api:8000")
@@ -51,6 +53,22 @@ class VisuraIntestatiInput(BaseModel):
     subalterno: Optional[str] = None
     sezione: Optional[str] = None
 
+# --- Catalog Search Models ---
+class ComuneSearchResponse(BaseModel):
+    codice_catastale: str
+    denominazione: str
+    sigla_provincia: str
+    regione: str
+    codice_istat: str
+    denominazione_upstream: Optional[str] = None
+    provincia_upstream: Optional[str] = None
+    regione_upstream: Optional[str] = None
+
+class ParcelResponse(BaseModel):
+    sezione: Optional[str]
+    foglio: str
+    particella: str
+
 # --- Helpers ---
 
 def get_params_hash(params: Dict[str, Any]) -> str:
@@ -67,11 +85,87 @@ async def get_upstream_health():
     except Exception:
         return False, None
 
+def get_levenshtein_suggestions(db: Session, table, column, value, limit=3):
+    """Simple suggestion helper using fuzzy match logic if available, or just case-insensitive prefix."""
+    # For now, let's use a simple ILIKE prefix match as a fallback if pg_trgm is not installed
+    # or just a broad search.
+    query = db.query(column).filter(column.ilike(f"%{value}%")).distinct().limit(limit)
+    return [r[0] for r in query.all()]
+
+def validate_and_canonicalize_params(db: Session, params: Dict[str, Any]):
+    """
+    Validates visura parameters against the catalog.
+    If valid, returns (canonical_params, upstream_params).
+    If invalid, raises HTTPException 400 with details.
+    """
+    # 1. Resolve Comune
+    comune_name = params.get("comune", "").strip().upper()
+    prov_code = params.get("provincia", "").strip().upper()
+    
+    cat_comune = db.query(CatalogComune).filter(
+        CatalogComune.denominazione == comune_name,
+        CatalogComune.sigla_provincia == prov_code
+    ).first()
+    
+    if not cat_comune:
+        # Check if maybe they used a 4-letter code instead of name
+        cat_comune = db.query(CatalogComune).filter(CatalogComune.codice_catastale == comune_name).first()
+
+    if not cat_comune:
+        suggestions = get_levenshtein_suggestions(db, CatalogComune, CatalogComune.denominazione, comune_name)
+        raise HTTPException(status_code=400, detail={
+            "error": "Comune non trovato nel catalogo",
+            "invalid_fields": ["comune", "provincia"],
+            "suggestions": suggestions
+        })
+
+    # 2. Check Parcel availability
+    foglio = params.get("foglio", "").strip().lstrip('0') or "0"
+    particella = params.get("particella", "").strip().lstrip('0') or "0"
+    sezione = params.get("sezione")
+    if sezione == "" or sezione == "_":
+        sezione = None
+        
+    # Query parcel catalog - no more zfill(4)
+    exists = db.query(CatalogParcel).filter(
+        CatalogParcel.codice_comune == cat_comune.codice_catastale,
+        CatalogParcel.foglio == foglio,
+        CatalogParcel.particella == particella
+    )
+    if sezione:
+        exists = exists.filter(CatalogParcel.sezione == sezione)
+    else:
+        exists = exists.filter(CatalogParcel.sezione.is_(None))
+        
+    if not exists.first():
+        raise HTTPException(status_code=400, detail={
+            "error": "Foglio o Particella non validi per questo comune",
+            "invalid_fields": ["foglio", "particella"],
+            "hints": f"Verificato per comune {cat_comune.denominazione} ({cat_comune.codice_catastale})"
+        })
+
+    # 3. Construct Upstream Params (with Overrides)
+    upstream_params = params.copy()
+    upstream_params["comune"] = cat_comune.denominazione_upstream or cat_comune.denominazione
+    upstream_params["provincia"] = cat_comune.provincia_upstream or cat_comune.sigla_provincia # Should we use full name here? 
+    # If the user says province full name is needed:
+    # cat_comune already has sigla_provincia (e.g. 'TP').
+    # But for upstream we might need 'TRAPANI'.
+    # We'll rely on the override field 'provincia_upstream' if set.
+    
+    if cat_comune.regione_upstream:
+        upstream_params["regione"] = cat_comune.regione_upstream
+
+    return params, upstream_params
+
 # --- Endpoints ---
 
 @app.post("/visura")
 async def proxy_ricerca(request: VisuraInput, db: Session = Depends(get_db)):
     params = request.model_dump()
+    # Validate against catalog
+    _, upstream_params = validate_and_canonicalize_params(db, params)
+    
     phash = get_params_hash(params)
     
     # Check cache
@@ -90,7 +184,7 @@ async def proxy_ricerca(request: VisuraInput, db: Session = Depends(get_db)):
     # Miss or Expired: Call Upstream
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(f"{UPSTREAM_API_URL}/visura", json=params)
+            response = await client.post(f"{UPSTREAM_API_URL}/visura", json=upstream_params)
             response.raise_for_status()
             upstream_data = response.json()
             # visure-api returns a list of IDs. We take the first one for simplicity if multiple.
@@ -131,8 +225,10 @@ async def proxy_ricerca(request: VisuraInput, db: Session = Depends(get_db)):
 
 @app.post("/visura/intestati")
 async def proxy_intestati(request: VisuraIntestatiInput, db: Session = Depends(get_db)):
-    # Same logic as /visura but different upstream endpoint
     params = request.model_dump()
+    # Validate against catalog
+    _, upstream_params = validate_and_canonicalize_params(db, params)
+    
     phash = get_params_hash(params)
     
     cached = db.query(QueryCache).filter(QueryCache.params_hash == phash).first()
@@ -145,7 +241,7 @@ async def proxy_intestati(request: VisuraIntestatiInput, db: Session = Depends(g
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(f"{UPSTREAM_API_URL}/visura/intestati", json=params)
+            response = await client.post(f"{UPSTREAM_API_URL}/visura/intestati", json=upstream_params)
             response.raise_for_status()
             upstream_data = response.json()
             upstream_id = upstream_data["request_id"]
@@ -300,6 +396,76 @@ async def health_check(db: Session = Depends(get_db)):
             "info": upstream_info
         }
     })
+
+@app.post("/catalog/reload")
+async def trigger_reload(db: Session = Depends(get_db)):
+    # Paths (relative to app directory based on volume mount)
+    comuni_path = "/app/staticData/comuniANPR_ISTAT.csv"
+    parcels_path = "/app/staticData/parcelIndex.csv"
+    mapping_path = "/app/staticData/province_mapping.csv"
+    
+    if not os.path.exists(comuni_path) or not os.path.exists(parcels_path):
+        raise HTTPException(status_code=500, detail="Static data files not found in /app/staticData")
+        
+    result = reload_catalog(db, comuni_path, parcels_path, mapping_path)
+    return JSONResponse(result)
+
+@app.get("/catalog/comuni", response_model=list[ComuneSearchResponse])
+async def search_comuni(
+    q: Optional[str] = None, 
+    provincia: Optional[str] = None, 
+    regione: Optional[str] = None, 
+    istat: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(CatalogComune)
+    
+    if q:
+        q_clean = q.strip()
+        # Fuzzy match (simple version for now: ILIKE %q%)
+        query = query.filter(or_(
+            CatalogComune.denominazione.ilike(f"%{q_clean}%"),
+            CatalogComune.codice_catastale.ilike(f"%{q_clean}%")
+        ))
+    
+    if provincia:
+        query = query.filter(CatalogComune.sigla_provincia == provincia.strip().upper())
+        
+    if regione:
+        # Fuzzy for regione
+        query = query.filter(CatalogComune.regione.ilike(f"%{regione.strip()}%"))
+        
+    if istat:
+        query = query.filter(CatalogComune.codice_istat == istat.strip())
+        
+    results = query.limit(50).all()
+    return results
+
+@app.get("/catalog/comuni/{cod_cat}/sheets")
+async def list_sheets(cod_cat: str, db: Session = Depends(get_db)):
+    results = db.query(CatalogParcel.foglio).filter(
+        CatalogParcel.codice_comune == cod_cat.strip().upper()
+    ).distinct().order_by(CatalogParcel.foglio).all()
+    
+    return [r[0] for r in results]
+
+@app.get("/catalog/comuni/{cod_cat}/sheets/{foglio}/parcels")
+async def list_parcels(cod_cat: str, foglio: str, sezione: Optional[str] = None, db: Session = Depends(get_db)):
+    # Normalize foglio
+    fog_norm = foglio.strip().lstrip('0') or "0"
+    
+    query = db.query(CatalogParcel.particella).filter(
+        CatalogParcel.codice_comune == cod_cat.upper(),
+        CatalogParcel.foglio == fog_norm
+    )
+    
+    if sezione:
+        query = query.filter(CatalogParcel.sezione == sezione)
+    else:
+        query = query.filter(CatalogParcel.sezione.is_(None))
+        
+    results = query.distinct().order_by(CatalogParcel.particella).all()
+    return [r[0] for r in results]
 
 @app.delete("/cache/{proxy_id}")
 async def delete_cache(proxy_id: str, db: Session = Depends(get_db)):

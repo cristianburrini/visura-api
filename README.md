@@ -52,6 +52,7 @@ Entrambe le richieste vengono accodate ed eseguite sequenzialmente su un singolo
 - **Keep-alive** — la sessione viene mantenuta attiva con un light keep-alive ogni 30 secondi e un refresh profondo ogni 5 minuti
 - **Graceful shutdown** — su `SIGINT`/`SIGTERM` il servizio effettua il logout dal portale prima di chiudere il browser
 - **Logging HTML completo** — ogni pagina visitata dal browser viene salvata su disco per debug e audit
+- **Validazione Catalogo** — Controllo preventivo di comuni, fogli e particelle contro un catalogo statico per evitare visure errate.
 - **Docker-ready** — immagine API basata su Chromium headless
 
 ### Compatibilità SPID
@@ -252,6 +253,9 @@ Cerca tutti gli immobili su una particella catastale. Se `tipo_catasto` è omess
 | `sezione` | `string` | | `null` | Sezione censuaria (se presente) |
 | `tipo_catasto` | `string` | | `null` | `"T"` = Terreni, `"F"` = Fabbricati. Se omesso: entrambi |
 
+> [!IMPORTANT]
+> **Validazione Attiva**: Il servizio valida l'input contro il catalogo statico. Se il comune, il foglio o la particella non sono validi, l'API restituirà `400 Bad Request` con i dettagli dell'errore.
+
 **Esempio:**
 
 ```bash
@@ -438,13 +442,29 @@ Estrae le sezioni censuarie per tutte le province e comuni d'Italia. **Operazion
 
 ---
 
+### Catalogo e Ricerca
+
+#### Cerca Comuni
+```
+GET /catalog/comuni?q=Terni
+```
+Restituisce i dettagli dei comuni (codice catastale, ISTAT, etc.) corrispondenti alla ricerca fuzzy.
+
+#### Elenca Fogli/Particelle
+```
+GET /catalog/comuni/{cod_cat}/sheets
+GET /catalog/comuni/{cod_cat}/sheets/{foglio}/parcels
+```
+
+#### Ricarica Catalogo (Admin)
+```
+POST /catalog/reload
+```
+Ricarica i dati dai file CSV montati nella directory `staticData`.
+
+---
+
 ### Shutdown
-
-```
-POST /shutdown
-```
-
-Esegue un shutdown controllato: logout dal portale SISTER e chiusura del browser.
 
 ---
 

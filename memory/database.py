@@ -73,6 +73,35 @@ class Titolarita(Base):
     immobile = relationship("Immobile", back_populates="titolarita")
     soggetto = relationship("Soggetto", back_populates="titolarita")
 
+class CatalogComune(Base):
+    __tablename__ = "catalog_comuni"
+    
+    codice_catastale = Column(String(10), primary_key=True, index=True)
+    denominazione = Column(String(255), index=True)
+    sigla_provincia = Column(String(5), index=True)
+    regione = Column(String(100), index=True)
+    codice_istat = Column(String(10), index=True)
+    
+    # Upstream Overrides for provider compatibility
+    denominazione_upstream = Column(String(255), nullable=True)
+    provincia_upstream = Column(String(255), nullable=True)
+    regione_upstream = Column(String(1055), nullable=True)
+
+class CatalogParcel(Base):
+    __tablename__ = "catalog_parcels"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    codice_comune = Column(String(10), index=True)
+    sezione = Column(String(10), index=True, nullable=True)
+    foglio = Column(String(10), index=True)
+    particella = Column(String(10), index=True)
+    
+    # We'll use a unique constraint to support UPSERT/Merge
+    from sqlalchemy import UniqueConstraint
+    __table_args__ = (
+        UniqueConstraint('codice_comune', 'sezione', 'foglio', 'particella', name='_parcel_uc'),
+    )
+
 class QueryCache(Base):
     __tablename__ = "query_cache"
     

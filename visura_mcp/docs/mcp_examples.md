@@ -248,6 +248,76 @@ Poi, per ogni subalterno di interesse, si prosegue con `avvia_ricerca_intestatar
 
 ---
 
+## Caso 4 — Utilizzo del Catalogo (Validazione preventiva)
+
+### Prompt dell'utente
+> _"Cerca il codice catastale di Terni e dimmi quali fogli sono disponibili."_
+
+### Flusso MCP
+
+**Step 1 — Cerca il comune**
+
+Tool: `mcp_visure_search_comune`
+```json
+{
+  "q": "Terni"
+}
+```
+
+Risposta:
+```json
+[
+  {
+    "denominazione": "TERNI",
+    "codice_catastale": "L117",
+    "sigla_provincia": "TR",
+    "regione": "UMBRIA",
+    "codice_istat": "055032"
+  }
+]
+```
+
+**Step 2 — Elenca i fogli**
+
+Tool: `mcp_visure_list_parcels`
+```json
+{
+  "codice_catastale": "L117"
+}
+```
+
+Risposta:
+```
+Fogli disponibili per L117: ["0001", "0002", "0003", ...]
+```
+
+---
+
+## Caso 5 — Gestione degli Errori di Validazione
+
+Se provi ad avviare una visura con dati non presenti nel catalogo, riceverai un errore immediato (400) senza attendere il portale SISTER.
+
+### Esempio di Errore
+Tool: `avvia_ricerca_immobili_o_terreni`
+```json
+{
+  "provincia": "TR",
+  "comune": "TERNI",
+  "foglio": "9999",
+  "particella": "1"
+}
+```
+
+Risposta:
+```
+API Error: {"detail": {"error": "Foglio o Particella non validi per questo comune", "invalid_fields": ["foglio"]}}
+```
+
+### Come reagire
+L'agente deve usare `mcp_visure_list_parcels` per trovare il foglio corretto o chiedere chiarimenti all'utente.
+
+---
+
 ## Gestione Errori Comuni
 
 | Situazione | Risposta API | Come gestire |

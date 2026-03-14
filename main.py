@@ -5,13 +5,13 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, Any, List
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from utils import PageLogger, extract_all_sezioni, login, logout, run_visura, run_visura_immobile
 
@@ -22,7 +22,7 @@ load_dotenv()
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Create logs directory if it doesn't exist and we have permission
-log_handlers = [logging.StreamHandler()]
+log_handlers: List[logging.Handler] = [logging.StreamHandler()]
 try:
     if not os.path.exists("./logs"):
         os.makedirs("./logs", exist_ok=True)
@@ -73,7 +73,7 @@ class VisuraRequest:
     particella: str
     sezione: Optional[str] = None
     subalterno: Optional[str] = None
-    timestamp: datetime = None
+    timestamp: datetime = Field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
@@ -92,7 +92,7 @@ class VisuraIntestatiRequest:
     particella: str
     subalterno: Optional[str] = None
     sezione: Optional[str] = None
-    timestamp: datetime = None
+    timestamp: datetime = Field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
@@ -106,7 +106,7 @@ class VisuraResponse:
     tipo_catasto: str
     data: Optional[Dict] = None
     error: Optional[str] = None
-    timestamp: datetime = None
+    timestamp: datetime = Field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
@@ -120,7 +120,8 @@ class BrowserManager:
         self.auth_page: Optional[Page] = None
         self.authenticated = False
         self.keep_alive_running = False
-        self.last_login_time = None
+        self.last_login_time: Optional[datetime] = None
+        self.playwright: Any = None
 
     async def initialize(self):
         """Inizializza il browser e il contexto"""
@@ -221,10 +222,11 @@ class BrowserManager:
     async def _perform_light_keepalive(self):
         """Keep-alive leggero: movimento del mouse"""
         try:
-            await self.auth_page.mouse.move(100, 100)
-            await asyncio.sleep(0.1)
-            await self.auth_page.mouse.move(200, 200)
-            logger.debug("Keep-alive movimento mouse eseguito")
+            if self.auth_page:
+                await self.auth_page.mouse.move(100, 100)
+                await asyncio.sleep(0.1)
+                await self.auth_page.mouse.move(200, 200)
+                logger.debug("Keep-alive movimento mouse eseguito")
         except Exception as e:
             logger.warning(f"Errore in light keep-alive: {e}")
 
@@ -232,6 +234,9 @@ class BrowserManager:
         """Refresh approfondito della sessione navigando alla pagina di scelta servizio"""
         try:
             logger.info("Eseguendo refresh della sessione...")
+
+            if not self.auth_page:
+                return False
 
             await self.auth_page.goto(
                 "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=30000
@@ -663,7 +668,8 @@ class VisuraInput(BaseModel):
         None, pattern=r"^[TF]$", description="'T' = Terreni, 'F' = Fabbricati (se omesso esegue entrambi)"
     )
 
-    @validator("tipo_catasto")
+    @field_validator("tipo_catasto", mode="before")
+    @classmethod
     def validate_tipo_catasto(cls, v):
         if v is not None and v not in ["T", "F"]:
             raise ValidationError(f"tipo_catasto deve essere 'T' o 'F', ricevuto {v}")
@@ -681,15 +687,18 @@ class VisuraIntestatiInput(BaseModel):
     subalterno: Optional[str] = Field(None, description="Numero di subalterno (obbligatorio per Fabbricati)")
     sezione: Optional[str] = Field(None, description="Sezione (opzionale)")
 
-    @validator("tipo_catasto")
+    @field_validator("tipo_catasto", mode="before")
+    @classmethod
     def validate_tipo_catasto(cls, v):
         if v not in ["T", "F"]:
             raise ValidationError(f"tipo_catasto deve essere 'T' o 'F', ricevuto {v}")
         return v
 
-    @validator("subalterno")
-    def validate_subalterno(cls, v, values):
-        tipo_catasto = values.get("tipo_catasto")
+    @field_validator("subalterno", mode="before")
+    @classmethod
+    def validate_subalterno(cls, v, info):
+        # info.data contains other fields in V2
+        tipo_catasto = info.data.get("tipo_catasto")
         if tipo_catasto == "F" and not v:
             raise ValidationError("subalterno è obbligatorio per i fabbricati (tipo_catasto='F')")
         if tipo_catasto == "T" and v:
@@ -720,11 +729,12 @@ async def richiedi_visura(request: VisuraInput, service: VisuraService = Depends
         tipos_catasto = [request.tipo_catasto] if request.tipo_catasto else ["T", "F"]
         request_ids = []
 
-        for tipo_catasto in tipos_catasto:
-            request_id = f"req_{tipo_catasto}_{int(time.time() * 1000)}"
+        for tc in tipos_catasto:
+            if tc is None: continue
+            request_id = f"req_{tc}_{int(time.time() * 1000)}"
             visura_req = VisuraRequest(
                 request_id=request_id,
-                tipo_catasto=tipo_catasto,
+                tipo_catasto=tc,
                 provincia=request.provincia,
                 comune=request.comune,
                 sezione=sezione,

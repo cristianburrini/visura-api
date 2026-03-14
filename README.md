@@ -464,6 +464,40 @@ Ricarica i dati dai file CSV montati nella directory `staticData`.
 
 ---
 
+### Sottomissione Massiva (Background Job)
+Il Memory Proxy include un sistema di accodamento persistente per gestire sottomissioni massive di visure, ottimizzando l'uso delle API core e rispettando i limiti di velocità.
+
+#### Schedulazione Massiva
+```
+POST /massive/schedule
+```
+Accoda una lista di target per la visura. Supporta 3 scenari:
+1. **Scenario 1**: Ricerca immobili su lista di particelle.
+2. **Scenario 2**: Ricerca intestatari su lista di subalterni.
+3. **Scenario 3**: Ricerca immobili + ricerca automatica di tutti gli intestatari risultanti.
+
+**Corpo della richiesta:**
+```json
+{
+  "scenario": 3,
+  "provincia": "Roma",
+  "comune": "ROMA",
+  "targets": [
+    {"foglio": "100", "particella": "50"},
+    {"foglio": "100", "particella": "51"}
+  ],
+  "tipo_catasto": "F"
+}
+```
+
+#### Monitoraggio Coda
+```
+GET /massive/status
+```
+Restituisce statistiche sulla coda (pending, submitted, done, error) e gli ultimi elementi completati.
+
+---
+
 ### Shutdown
 
 ---

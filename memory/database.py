@@ -115,6 +115,33 @@ class QueryCache(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class ScheduledVisura(Base):
+    __tablename__ = "scheduled_visures"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    target_type = Column(String(20)) # 'PARTICELLA', 'SUBALTERNO'
+    scenario = Column(Integer) # 1, 2, 3
+    
+    # Target identifiers
+    provincia = Column(String(100))
+    comune = Column(String(100))
+    foglio = Column(String(50))
+    particella = Column(String(50))
+    subalterno = Column(String(50), nullable=True)
+    sezione = Column(String(50), nullable=True)
+    tipo_catasto = Column(String(2), nullable=True) # 'T', 'F', or None (both)
+    
+    # State management
+    status = Column(String(20), default="pending", index=True) # 'pending', 'submitted', 'done', 'error'
+    upstream_id = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Performance monitoring
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
 def init_db():
     Base.metadata.create_all(bind=engine)
 

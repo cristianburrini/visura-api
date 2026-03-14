@@ -57,9 +57,10 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppass}@db:5432/${POSTGRES_DB:-visura_cache}
       - UPSTREAM_API_URL=http://core-api:8000
       - CACHE_EXPIRATION_DAYS=${CACHE_EXPIRATION_DAYS:-365}
-      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
     volumes:
-      - ../memory:/app
+      - ../memory:/app/memory
+    working_dir: /app
     depends_on:
       db:
         condition: service_healthy

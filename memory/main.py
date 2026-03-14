@@ -283,8 +283,10 @@ async def health_check(db: Session = Depends(get_db)):
     # Check DB
     db_status = "healthy"
     try:
-        db.execute("SELECT 1")
-    except Exception:
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        logger.error(f"DB Health check failed: {e}")
         db_status = "unhealthy"
         
     # Check Upstream

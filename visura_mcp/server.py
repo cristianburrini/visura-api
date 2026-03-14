@@ -146,6 +146,20 @@ async def avvia_ricerca_intestatari(
         except Exception as e:
             return f"Error: {str(e)}"
 
+@mcp.tool()
+async def get_health() -> str:
+    """Controlla lo stato di salute dell'infrastruttura sottostante (Visura API)."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{VISURA_API_URL}/health", timeout=10.0)
+            response.raise_for_status()
+            data = response.json()
+            return f"API Status: {data.get('status')}. Authenticated: {data.get('authenticated')}. Queue Size: {data.get('queue_size')}."
+        except httpx.HTTPStatusError as e:
+            return f"API Health Error: {e.response.text}"
+        except Exception as e:
+            return f"Error connecting to API health endpoint: {str(e)}"
+
 if __name__ == "__main__":
     # Start the MCP server (stdio mode by default)
     mcp.run()

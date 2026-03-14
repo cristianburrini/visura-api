@@ -524,6 +524,7 @@ class VisuraService:
         self.browser_manager = BrowserManager()
         self.request_queue = asyncio.Queue()
         self.response_store: Dict[str, VisuraResponse] = {}
+        self.pending_requests: set = set()
         self.processing = False
 
     async def initialize(self):
@@ -547,15 +548,19 @@ class VisuraService:
                 if isinstance(request, VisuraRequest):
                     response = await self.browser_manager.esegui_visura(request)
                     self.response_store[request.request_id] = response
+                    self.pending_requests.discard(request.request_id)
                     logger.info(f"Processata richiesta visura {request.request_id}")
 
                 elif isinstance(request, VisuraIntestatiRequest):
                     response = await self.browser_manager.esegui_visura_intestati(request)
                     self.response_store[request.request_id] = response
+                    self.pending_requests.discard(request.request_id)
                     logger.info(f"Processata richiesta intestati {request.request_id}")
 
                 else:
                     logger.error(f"Tipo di richiesta sconosciuto: {type(request)}")
+                    if hasattr(request, 'request_id'):
+                        self.pending_requests.discard(request.request_id)
 
                 self.request_queue.task_done()
 
@@ -568,6 +573,7 @@ class VisuraService:
 
     async def add_request(self, request: VisuraRequest) -> str:
         """Aggiunge una richiesta alla coda"""
+        self.pending_requests.add(request.request_id)
         await self.request_queue.put({"request": request})
         logger.info(
             f"Richiesta visura {request.request_id} aggiunta alla coda (posizione: {self.request_queue.qsize()})"
@@ -576,6 +582,7 @@ class VisuraService:
 
     async def add_intestati_request(self, request: VisuraIntestatiRequest) -> str:
         """Aggiunge una richiesta intestati alla coda"""
+        self.pending_requests.add(request.request_id)
         await self.request_queue.put({"request": request})
         logger.info(
             f"Richiesta intestati {request.request_id} aggiunta alla coda (posizione: {self.request_queue.qsize()})"
@@ -585,6 +592,10 @@ class VisuraService:
     async def get_response(self, request_id: str) -> Optional[VisuraResponse]:
         """Ottiene la risposta per un request_id"""
         return self.response_store.get(request_id)
+
+    async def is_request_pending(self, request_id: str) -> bool:
+        """Verifica se una richiesta è in coda o in elaborazione"""
+        return request_id in self.pending_requests
 
     async def shutdown(self):
         """Chiude il servizio"""
@@ -746,6 +757,15 @@ async def ottieni_visura(request_id: str, service: VisuraService = Depends(get_v
         response = await service.get_response(request_id)
 
         if response is None:
+            if not await service.is_request_pending(request_id):
+                return JSONResponse(
+                    {
+                        "request_id": request_id, 
+                        "status": "error", 
+                        "error": "Richiesta non trovata (potrebbe essere andata persa in un riavvio del server)"
+                    }
+                )
+            
             return JSONResponse(
                 {"request_id": request_id, "status": "processing", "message": "Richiesta in elaborazione"}
             )

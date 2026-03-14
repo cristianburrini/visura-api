@@ -576,12 +576,24 @@ async def run_visura(
             # Se ci sono radio button, seleziona quello corrente
             if radio_count > 1 or await radio_buttons.count() > 0:
                 try:
+                    # Verifica che siamo sulla pagina giusta prima di cliccare
+                    page_content = await page.content()
+                    if "Elenco Immobili" not in page_content:
+                        logger.warning(f"[VISURA] Non sono sulla pagina Elenco Immobili per ris {result_index}, tento di recuperare...")
+                        # Se siamo sulla pagina degli intestati, torniamo indietro
+                        if "Elenco Intestati" in page_content or "Intestazione" in page_content or "NESSUNA CORRISPONDENZA TROVATA" in page_content:
+                             indietro_btns = page.locator("input[name='indietro'][value='Indietro']")
+                             if await indietro_btns.count() > 0:
+                                 await indietro_btns.first.click()
+                                 await page.wait_for_load_state("networkidle", timeout=30000)
+
                     logger.info(f"[VISURA] Selezionando radio button {result_index}")
                     await radio_buttons.nth(result_index).click()
                     await page.wait_for_timeout(1000)  # Breve pausa
                     logger.info(f"[VISURA] Radio button {result_index} selezionato")
                 except Exception as e:
                     logger.error(f"[VISURA] Errore nella selezione radio button {result_index}: {e}")
+                    # Se fallisce il click, proviamo a ri-caricare il locator o loggare il fallimento
                     continue
 
             # Inizializza lista intestati vuota
@@ -607,9 +619,17 @@ async def run_visura(
                     intestati_button = None
                     for selector in intestati_button_selectors:
                         try:
-                            locator = page.locator(selector)
+                            # Use visibility check to avoid clicking hidden buttons
+                            locator = page.locator(selector).filter(has_text="") # basic filter to ensure it's an element
                             if await locator.count() > 0:
-                                intestati_button = locator.first
+                                # Prioritize visible buttons
+                                for i in range(await locator.count()):
+                                    if await locator.nth(i).is_visible():
+                                        intestati_button = locator.nth(i)
+                                        break
+                                if not intestati_button:
+                                    intestati_button = locator.first
+                                
                                 logger.info(f"[VISURA] Bottone Intestati trovato con selettore: {selector}")
                                 break
                         except Exception as e:
@@ -699,21 +719,28 @@ async def run_visura(
 
                         # Se ci sono altri risultati da processare, torna alla pagina precedente
                         if result_index < radio_count - 1:
-                            logger.info("[VISURA] Tornando indietro per processare il prossimo risultato...")
-                            try:
-                                # Cerca il bottone "Indietro"
-                                indietro_button = page.locator("input[name='indietro'][value='Indietro']")
-                                if await indietro_button.count() > 0:
-                                    await indietro_button.click()
-                                    await page.wait_for_load_state("networkidle", timeout=30000)
-                                    logger.info(f"[VISURA] Tornato indietro, pronto per risultato {result_index + 2}")
-                                    await page_logger.log(page, f"indietro_r{result_index + 1}")
-                                else:
-                                    logger.info("[VISURA] Bottone Indietro non trovato")
-                                    break
-                            except Exception as e:
-                                logger.error(f"[VISURA] Errore nel tornare indietro: {e}")
-                                break
+                            # VERIFICA: Siamo davvero su una pagina da cui dobbiamo tornare indietro?
+                            # Se siamo già sulla pagina immobili (magari perché l'estrazione è fallita silenziosamente), 
+                            # cliccare Indietro ci porterebbe alla ricerca, rompendo il loop.
+                            current_content = await page.content()
+                            if "Elenco Immobili" in current_content and "Elenco Intestati" not in current_content and "NESSUNA CORRISPONDENZA TROVATA" not in current_content:
+                                logger.info(f"[VISURA] Sono già sulla pagina Elenco Immobili, salto Indietro per ris {result_index + 1}")
+                            else:
+                                logger.info(f"[VISURA] Tornando indietro per processare il prossimo risultato ({result_index + 2})...")
+                                try:
+                                    # Cerca il bottone "Indietro"
+                                    indietro_button = page.locator("input[name='indietro'][value='Indietro']")
+                                    if await indietro_button.count() > 0:
+                                        await indietro_button.first.click()
+                                        await page.wait_for_load_state("networkidle", timeout=30000)
+                                        logger.info(f"[VISURA] Tornato indietro, pronto per risultato {result_index + 2}")
+                                        await page_logger.log(page, f"indietro_r{result_index + 1}")
+                                    else:
+                                        logger.info("[VISURA] Bottone Indietro non trovato")
+                                        # Non interrompiamo, magari siamo già tornati indietro per qualche motivo
+                                except Exception as e:
+                                    logger.error(f"[VISURA] Errore nel tornare indietro: {e}")
+                                    # Non interrompiamo il loop
 
                     else:
                         logger.info(f"[VISURA] Bottone Intestati non trovato per risultato {result_index + 1}")

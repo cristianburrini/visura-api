@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Start Xvfb for Playwright if not already running (mostly for completeness in headless envs)
+# Start Xvfb for Playwright if not already running
 if [ -n "$DISPLAY" ] && [ "$DISPLAY" == ":99" ]; then
+    echo "Cleaning up Xvfb locks..."
+    rm -f /tmp/.X99-lock
     echo "Starting Xvfb on :99..."
     Xvfb :99 -screen 0 1280x1024x24 &
     sleep 2

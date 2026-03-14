@@ -1,0 +1,21 @@
+services:
+  memory-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: visura-memory-proxy
+    container_name: visura-memory-proxy
+    ports:
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://appuser:apppass@db:5432/visura_cache}
+      - UPSTREAM_API_URL=${UPSTREAM_API_URL:-http://visure-api:8000}
+      - CACHE_EXPIRATION_DAYS=${CACHE_EXPIRATION_DAYS:-365}
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s

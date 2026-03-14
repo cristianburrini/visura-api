@@ -1,0 +1,95 @@
+services:
+  # 1. Core Scraper API
+  core-api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: visura-api
+    container_name: visura-core-api
+    ports:
+      - "8004:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=.
+      - DISPLAY=:99
+      - 2FA_TIMEOUT_SECONDS=300
+    env_file:
+      - ../.env
+    volumes:
+      - ../:/app
+      - ../logs:/app/logs:rw
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 300s
+
+  # 2. Cache Database
+  db:
+    image: postgres:15-alpine
+    container_name: visura-assistant-db
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-appuser}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-apppass}
+      - POSTGRES_DB=${POSTGRES_DB:-visura_cache}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-appuser} -d ${POSTGRES_DB:-visura_cache}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Memory Proxy (Caching Layer)
+  memory-proxy:
+    build:
+      context: ../memory
+      dockerfile: Dockerfile
+    image: visura-memory-proxy
+    container_name: visura-assistant-proxy
+    ports:
+      - "8002:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-appuser}:${POSTGRES_PASSWORD:-apppass}@db:5432/${POSTGRES_DB:-visura_cache}
+      - UPSTREAM_API_URL=http://core-api:8000
+      - CACHE_EXPIRATION_DAYS=${CACHE_EXPIRATION_DAYS:-365}
+      - LOG_LEVEL=INFO
+    volumes:
+      - ../memory:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      core-api:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # 4. MCP Server (AI Interface)
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: visura_mcp/Dockerfile
+    image: visura-mcp
+    container_name: visura-assistant-mcp
+    depends_on:
+      memory-proxy:
+        condition: service_healthy
+    ports:
+      - "8001:8001"
+    environment:
+      - VISURA_API_URL=http://memory-proxy:8000
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=.
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

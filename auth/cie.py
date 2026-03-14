@@ -64,12 +64,17 @@ class CIEAuthProvider(BaseAuthProvider):
 
         print(f"[LOGIN_CIE] In attesa di conferma notifica su app CieID (hai {timeout_seconds} secondi)...")
         start_time = time.time()
+        resend_attempted = False
 
         while time.time() - start_time < timeout_seconds:
             try:
+                # Check for various success/progress buttons
                 autorizza_btn = page.get_by_role("button", name="Autorizza")
                 prosegui_btn = page.get_by_role("button", name="Prosegui")
                 ricerca_box = page.get_by_role("textbox", name="Cerca il servizio")
+                
+                # Check for "Resend notification" link
+                resend_link = page.locator("#push_link")
 
                 if await autorizza_btn.count() > 0 and await autorizza_btn.is_visible():
                     print("[LOGIN_CIE] Trovato pulsante 'Autorizza', procedo...")
@@ -86,15 +91,31 @@ class CIEAuthProvider(BaseAuthProvider):
                 elif await ricerca_box.count() > 0 and await ricerca_box.is_visible():
                     print("[LOGIN_CIE] Trovata barra di ricerca servizi, siamo nell'area agenzia entrate.")
                     break
+                
+                # Auto-resend after 45 seconds if no success yet
+                elapsed = time.time() - start_time
+                if elapsed > 45 and not resend_attempted:
+                    if await resend_link.count() > 0 and await resend_link.is_visible():
+                        print("[LOGIN_CIE] Notifica non arrivata dopo 45s, provo a inviarne una nuova...")
+                        await resend_link.click()
+                        resend_attempted = True
+                        if page_logger:
+                            await page_logger.log(page, "resend_notification_clicked")
+                        await page.wait_for_timeout(3000)
 
                 if await error_loc.count() > 0 and await error_loc.first.is_visible():
-                    raise Exception(
-                        "Login fallito durante l'attesa: l'utente ha annullato la notifica o sessione scaduta."
-                    )
+                    # Check if it was just a transient error or a real failure
+                    error_text = await error_loc.first.inner_text()
+                    print(f"[LOGIN_CIE] Alert rilevato: {error_text}")
+                    if "scaduta" in error_text.lower() or "annullato" in error_text.lower():
+                        raise Exception(f"Login fallito: {error_text}")
             except Exception as e:
                 if "Execution context was destroyed" not in str(
                     e
                 ) and "Target page, context or browser has been closed" not in str(e):
+                    # Se è un'eccezione lanciata da noi (per login fallito), ri-lanciamola
+                    if "Login fallito" in str(e):
+                        raise
                     print(f"[LOGIN_CIE] Eccezione ignorata durante il polling: {e}")
 
             await page.wait_for_timeout(1000)

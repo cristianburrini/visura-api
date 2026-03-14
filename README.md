@@ -150,7 +150,10 @@ docker run -d -p 8000:8000 --env-file .env --name visura-api visura-api
 curl http://localhost:8000/health
 ```
  
-> **Nota**: Per utilizzare il server MCP (Model Context Protocol), consulta la documentazione specifica nella cartella [visura_mcp/](visura_mcp/README.md).
+> **Nota**: Il progetto è organizzato in modo modulare:
+> - **[Visura API](docker-compose.yaml)** (root): Il servizio core.
+> - **[Memory Proxy](memory/README.md)**: Proxy con cache persistente (Postgres/MySQL) e modalità degradata.
+> - **[MCP Server](visura_mcp/README.md)**: Integrazione Model Context Protocol per AI.
 
 ### Installazione manuale (per sviluppo)
 

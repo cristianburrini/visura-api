@@ -1,0 +1,22 @@
+services:
+  visure-api:
+    extends:
+      file: ../docker-compose.yaml
+      service: visure-api
+    container_name: visura-mcp-api
+
+  visure-mcp:
+    build:
+      context: ..
+      dockerfile: visura_mcp/Dockerfile
+    image: visura-mcp
+    container_name: visura-mcp-server
+    depends_on:
+      - visure-api
+    ports:
+      - "8001:8001"
+    environment:
+      - VISURA_API_URL=http://visure-api:8000
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=.
+    restart: unless-stopped

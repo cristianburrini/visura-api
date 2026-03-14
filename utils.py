@@ -131,7 +131,17 @@ async def login(page: Page):
             # Check per utente già in sessione
             content = await page.content()
             if "Utente gia' in sessione" in content or "error_locked.jsp" in page.url:
-                raise Exception("Utente già in sessione su un'altra postazione (Rilevato all'ingresso)")
+                logger.warning("[LOGIN] Utente già in sessione. Tentativo di chiusura sessioni attive...")
+                await page_logger.log(page, "error_session_locked")
+                
+                # Cerca pulsante/link per chiudere sessioni
+                close_link = page.locator("a[href*='CloseSessionsSis'], a[href*='CloseSessions']")
+                if await close_link.count() > 0:
+                    await close_link.first.click()
+                    await page.wait_for_timeout(3000)
+                    logger.info("[LOGIN] Richiesta chiusura sessioni inviata. Il prossimo tentativo dovrebbe funzionare.")
+                
+                raise Exception("Utente già in sessione su un'altra postazione. Sessione resettata, riprova.")
                 
         if not found:
             logger.debug(f"[LOGIN][DEBUG] Timeout ricerca box. URL attuale: {page.url}")

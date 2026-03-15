@@ -175,3 +175,123 @@ async def test_worker_persistence_terreni(db, respx_mock):
     soggetto = db.query(Soggetto).filter(Soggetto.id == titolarita.soggetto_id).first()
     assert soggetto.nominativo == "ROSSI MARIO"
 
+
+@pytest.mark.asyncio
+async def test_scenario3_schedule_spawn_owners_on_cache_hit(client, db):
+    # 1. Setup a cached property result
+    target_data = {
+        "provincia": "RM",
+        "comune": "ROMA",
+        "foglio": "10",
+        "particella": "100",
+        "sezione": None,
+        "subalterno": None,
+        "tipo_catasto": "F"
+    }
+    phash = get_params_hash(target_data)
+    
+    mock_results = {
+        "results": [
+            {"immobile": {"Foglio": "10", "Particella": "100", "Sub": "1"}},
+            {"immobile": {"Foglio": "10", "Particella": "100", "Sub": "501"}}
+        ]
+    }
+    
+    completed_cache = QueryCache(
+        params_hash=phash,
+        status="completed",
+        results_json=mock_results,
+        params=target_data
+    )
+    db.add(completed_cache)
+    db.commit()
+
+    # 2. Schedule SAME target for Scenario 3
+    payload = {
+        "scenario": 3,
+        "provincia": "RM",
+        "comune": "ROMA",
+        "targets": [{"foglio": "10", "particella": "100"}],
+        "tipo_catasto": "F"
+    }
+    
+    resp = client.post("/massive/schedule", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["skipped"] == 1 # Property search skipped as expected
+    
+    # 3. Verify that SUBALTERNO items were spawned in the queue
+    subalterns = db.query(ScheduledVisura).filter(
+        ScheduledVisura.target_type == "SUBALTERNO",
+        ScheduledVisura.particella == "100"
+    ).all()
+    
+    assert len(subalterns) == 2
+    subs = {s.subalterno for s in subalterns}
+    assert "1" in subs
+    assert "501" in subs
+
+@pytest.mark.asyncio
+async def test_is_already_done_checks_persistent_data(db):
+    from memory.database import Immobile, Soggetto, Titolarita
+    from memory.scheduler import is_already_done
+    
+    # 1. Setup persistent data (Owners)
+    imm = Immobile(
+        provincia="RM", comune="ROMA", foglio="10", particella="100", subalterno="99",
+        tipo_catasto="F"
+    )
+    db.add(imm)
+    db.flush()
+    
+    sog = Soggetto(nominativo="TEST USER")
+    db.add(sog)
+    db.flush()
+    
+    tit = Titolarita(immobile_id=imm.id, soggetto_id=sog.id, tipo_titolarita="Proprietà")
+    db.add(tit)
+    db.commit()
+    
+    # 2. Target info
+    target = {
+        "provincia": "RM",
+        "comune": "ROMA",
+        "foglio": "10",
+        "particella": "100",
+        "subalterno": "99",
+        "tipo_catasto": "F"
+    }
+    
+@pytest.mark.asyncio
+async def test_worker_persistence_subalterno(db, respx_mock):
+    # 1. Setup a SUBALTERNO task
+    item = ScheduledVisura(
+        target_type="SUBALTERNO", scenario=3,
+        provincia="RM", comune="ROMA", foglio="10", particella="100", subalterno="1",
+        tipo_catasto="F", status="submitted", upstream_id="up_sub_1"
+    )
+    db.add(item)
+    db.commit()
+    
+    # 2. Mock upstream result (Dict with immobile and intestati)
+    mock_data = {
+        "status": "completed",
+        "data": {
+            "immobile": {"Foglio": "10", "Particella": "100", "Sub": "1", "Categoria": "A/2"},
+            "intestati": [{"Soggetto": "VERDI GIUSEPPE", "Quota": "1/2", "Titolarità": "Proprietà"}]
+        }
+    }
+    respx_mock.get("http://visure-api:8000/visura/up_sub_1").respond(json=mock_data)
+    
+    # 3. Process
+    await check_item_status(db, item)
+    
+    # 4. Verify DB
+    immobile = db.query(Immobile).filter(Immobile.subalterno == "1", Immobile.particella == "100").first()
+    assert immobile is not None
+    
+    tit = db.query(Titolarita).filter(Titolarita.immobile_id == immobile.id).first()
+    assert tit is not None
+    assert tit.tipo_titolarita == "Proprietà"
+    
+    sog = db.query(Soggetto).filter(Soggetto.id == tit.soggetto_id).first()
+    assert sog.nominativo == "VERDI GIUSEPPE"

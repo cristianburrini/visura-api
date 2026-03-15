@@ -19,6 +19,7 @@ from memory.database import (
 )
 from memory.transformer import normalize_visura_data
 from memory.catalog_manager import reload_catalog, validate_and_canonicalize_params
+from memory.scheduler import get_params_hash, is_already_done, schedule_scenario3_owners
 
 # Configuration
 UPSTREAM_API_URL = os.getenv("UPSTREAM_API_URL", "http://visure-api:8000")
@@ -102,37 +103,7 @@ class ParcelResponse(BaseModel):
 
 
 
-def get_params_hash(params: Dict[str, Any]) -> str:
-    """Creates a stable hash of the request parameters to use as cache key."""
-    # Ensure keys are sorted for stability
-    encoded = json.dumps(params, sort_keys=True).encode()
-    return hashlib.sha256(encoded).hexdigest()
-
-def is_already_done(db: Session, target: Dict[str, Any], scenario: int) -> bool:
-    """
-    Checks if a target is already processed or scheduled.
-    Prevents redundant processing by checking both QueryCache and ScheduledVisura.
-    """
-    phash = get_params_hash(target)
-    # Check if we already have it in completed cache
-    cached = db.query(QueryCache).filter(QueryCache.params_hash == phash, QueryCache.status == "completed").first()
-    if cached:
-        return True
-    
-    # Check if it's already in the massive submission queue
-    query = db.query(ScheduledVisura).filter(
-        ScheduledVisura.provincia == target.get("provincia"),
-        ScheduledVisura.comune == target.get("comune"),
-        ScheduledVisura.foglio == str(target.get("foglio")),
-        ScheduledVisura.particella == str(target.get("particella")),
-        ScheduledVisura.sezione == target.get("sezione"),
-        ScheduledVisura.subalterno == target.get("subalterno"),
-        ScheduledVisura.status.in_(["pending", "submitted", "done"])
-    )
-    if query.first():
-        return True
-        
-    return False
+# Hashing and duplicate check logic moved to memory.scheduler
 
 async def get_upstream_health() -> tuple[bool, Optional[Dict[str, Any]]]:
     """Checks the health of the upstream visure-api."""
@@ -365,6 +336,24 @@ async def schedule_massive(request: MassiveScheduleInput, db: Session = Depends(
             # Prevent redundant processing
             if is_already_done(db, target_data, request.scenario):
                 res_counts["skipped"] += 1
+                
+                # SPECIAL HANDLING FOR SCENARIO 3: 
+                # If the property search is already done, we must ensure owner searches are scheduled.
+                if request.scenario == 3 and target_type == "PARTICELLA" and tc != "T":
+                    phash = get_params_hash(target_data)
+                    cached = db.query(QueryCache).filter(QueryCache.params_hash == phash, QueryCache.status == "completed").first()
+                    if cached and cached.results_json:
+                        logger.info(f"Scenario 3: Property {target_data['foglio']}/{target_data['particella']} is cached. Scheduling owners...")
+                        await schedule_scenario3_owners(
+                            db, 
+                            target_data["provincia"], 
+                            target_data["comune"], 
+                            target_data["foglio"], 
+                            target_data["particella"], 
+                            target_data["sezione"], 
+                            cached.results_json,
+                            tipo_catasto=tc
+                        )
                 continue
                 
             new_item = ScheduledVisura(

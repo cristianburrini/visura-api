@@ -12,6 +12,12 @@ from playwright.async_api import Page
 
 PAGES_LOG_DIR = "./logs/pages"
 
+# Timeouts in milliseconds
+SHORT_WAIT = 3000       # 3 seconds
+MEDIUM_WAIT = 6000     # 5 seconds
+LONG_WAIT = 10000       # 10 seconds
+EXTRA_LONG_WAIT = 20000 # 20 seconds
+
 
 def parse_table(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -25,6 +31,17 @@ def parse_table(html):
                 cells.append("")
             rows.append(dict(zip(headers, cells)))
     return rows
+
+
+def is_session_expired(html_content: str) -> bool:
+    """Rileva se la sessione SISTER è scaduta dall'HTML."""
+    content_lower = html_content.lower()
+    return "error" in content_lower or "sessione scaduta" in content_lower or "login" in content_lower
+
+
+def is_no_results_found(html_content: str) -> bool:
+    """Rileva se la ricerca non ha prodotto risultati."""
+    return "NESSUNA CORRISPONDENZA TROVATA" in html_content
 
 
 class PageLogger:
@@ -71,7 +88,7 @@ class PageLogger:
                 logger.info(f"[PAGE_LOG] {self.flow_name}/{step_name}: pagina chiusa, skip")
                 return
             with suppress(Exception):
-                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                await page.wait_for_load_state("domcontentloaded", timeout=SHORT_WAIT)
             url = page.url
             html = await page.content()
             safe_name = re.sub(r"[^\w\-]", "_", step_name)
@@ -122,7 +139,7 @@ async def login(page: Page):
                 raise Exception("Rilevato redirect anomalo a cortesia_logout (Sessione invalidata dal server)")
             
             try:
-                await ricerca_box.wait_for(state="visible", timeout=2000)
+                await ricerca_box.wait_for(state="visible", timeout=2000) # Mantengo 2s per check rapido in loop
                 found = True
                 break
             except Exception:
@@ -276,8 +293,8 @@ async def run_visura(
 
     # STEP 1: Selezione Ufficio Provinciale
     logger.info("[VISURA] Navigando alla pagina di scelta servizio...")
-    await page.goto("https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=60000)
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.goto("https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=EXTRA_LONG_WAIT)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     logger.info("[VISURA] Pagina caricata")
     await page_logger.log(page, "scelta_servizio")
 
@@ -297,7 +314,7 @@ async def run_visura(
 
     # Verifica che la pagina sia stata caricata correttamente
     content = await page.content()
-    if "error" in content.lower() or "sessione scaduta" in content.lower() or "login" in content.lower():
+    if is_session_expired(content):
         raise Exception(
             "La sessione sembra essere scaduta o si è verificato un errore durante il caricamento della pagina"
         )
@@ -338,14 +355,14 @@ async def run_visura(
 
     logger.info("[VISURA] Cliccando Applica...")
     await page.locator("input[type='submit'][value='Applica']").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     logger.info("[VISURA] Applica cliccato, pagina caricata")
     await page_logger.log(page, "provincia_applicata")
 
     # STEP 2: Ricerca per immobili
     logger.info("[VISURA] Cliccando link Immobile...")
     await page.get_by_role("link", name="Immobile").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     logger.info("[VISURA] Link Immobile cliccato")
     await page_logger.log(page, "immobile")
 
@@ -394,7 +411,7 @@ async def run_visura(
     if sezione:
         logger.info("[VISURA] Cliccando 'scegli la sezione' per attivare dropdown...")
         await page.locator("input[name='selSezione'][value='scegli la sezione']").click()
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
         logger.info("[VISURA] Button sezione cliccato, dropdown attivato")
 
         # Prima estrai tutte le opzioni disponibili per debug
@@ -448,7 +465,7 @@ async def run_visura(
     # Clicca Ricerca
     logger.info("[VISURA] Cliccando Ricerca...")
     await page.locator("input[name='scelta'][value='Ricerca']").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     logger.info("[VISURA] Ricerca cliccata")
     await page_logger.log(page, "ricerca")
 
@@ -459,7 +476,7 @@ async def run_visura(
         if await conferma_button.count() > 0:
             logger.info("[VISURA] Rilevata richiesta conferma assenza subalterno...")
             await conferma_button.click()
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
             logger.info("[VISURA] Conferma assenza subalterno cliccata")
             await page_logger.log(page, "conferma_subalterno")
     except Exception as e:
@@ -469,7 +486,7 @@ async def run_visura(
 
     # STEP 3.1: Controlla se la ricerca ha restituito risultati
     page_text = await page.inner_text("body")
-    if "NESSUNA CORRISPONDENZA TROVATA" in page_text:
+    if is_no_results_found(page_text):
         time1 = time.time()
         logger.info(
             f"[VISURA] Nessuna corrispondenza trovata per foglio={foglio}, particella={particella} in {time1-time0:.2f}s"
@@ -506,7 +523,7 @@ async def run_visura(
                     for i in range(count):
                         try:
                             table_elem = immobili_table.nth(i)
-                            immobili_html = await table_elem.inner_html(timeout=10000)
+                            immobili_html = await table_elem.inner_html(timeout=SHORT_WAIT)
 
                             # Verifica se contiene le colonne che ci aspettiamo
                             if "Foglio" in immobili_html or "Particella" in immobili_html:
@@ -552,7 +569,12 @@ async def run_visura(
             radio_count = 1
 
         # Itera attraverso ogni risultato
+        consecutive_errors = 0
         for result_index in range(radio_count):
+            if consecutive_errors >= 3:
+                logger.error(f"[VISURA] Interruzione scansione risultati per troppi errori consecutivi ({consecutive_errors})")
+                break
+
             logger.info(f"[VISURA] Processando risultato {result_index + 1}/{radio_count}")
 
             # Controlla se questo immobile è "Soppressa" prima di processarlo
@@ -581,18 +603,19 @@ async def run_visura(
                     if "Elenco Immobili" not in page_content:
                         logger.warning(f"[VISURA] Non sono sulla pagina Elenco Immobili per ris {result_index}, tento di recuperare...")
                         # Se siamo sulla pagina degli intestati, torniamo indietro
-                        if "Elenco Intestati" in page_content or "Intestazione" in page_content or "NESSUNA CORRISPONDENZA TROVATA" in page_content:
+                        if "Elenco Intestati" in page_content or "Intestazione" in page_content or is_no_results_found(page_content):
                              indietro_btns = page.locator("input[name='indietro'][value='Indietro']")
                              if await indietro_btns.count() > 0:
                                  await indietro_btns.first.click()
-                                 await page.wait_for_load_state("networkidle", timeout=30000)
+                                 await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
 
                     logger.info(f"[VISURA] Selezionando radio button {result_index}")
-                    await radio_buttons.nth(result_index).click()
+                    await radio_buttons.nth(result_index).click(timeout=SHORT_WAIT)
                     await page.wait_for_timeout(1000)  # Breve pausa
                     logger.info(f"[VISURA] Radio button {result_index} selezionato")
                 except Exception as e:
                     logger.error(f"[VISURA] Errore nella selezione radio button {result_index}: {e}")
+                    consecutive_errors += 1
                     # Se fallisce il click, proviamo a ri-caricare il locator o loggare il fallimento
                     continue
 
@@ -638,7 +661,7 @@ async def run_visura(
 
                     if intestati_button:
                         await intestati_button.click()
-                        await page.wait_for_load_state("networkidle", timeout=30000)
+                        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                         logger.info(f"[VISURA] Intestati cliccato per risultato {result_index + 1}")
                         await page_logger.log(page, f"intestati_r{result_index + 1}")
 
@@ -668,7 +691,7 @@ async def run_visura(
                                     for i in range(count):
                                         try:
                                             table_elem = intestati_table.nth(i)
-                                            intestati_html = await table_elem.inner_html(timeout=10000)
+                                            intestati_html = await table_elem.inner_html(timeout=SHORT_WAIT)
 
                                             # Verifica se contiene le colonne che ci aspettiamo per gli intestati
                                             if (
@@ -723,7 +746,7 @@ async def run_visura(
                             # Se siamo già sulla pagina immobili (magari perché l'estrazione è fallita silenziosamente), 
                             # cliccare Indietro ci porterebbe alla ricerca, rompendo il loop.
                             current_content = await page.content()
-                            if "Elenco Immobili" in current_content and "Elenco Intestati" not in current_content and "NESSUNA CORRISPONDENZA TROVATA" not in current_content:
+                            if "Elenco Immobili" in current_content and "Elenco Intestati" not in current_content and not is_no_results_found(current_content):
                                 logger.info(f"[VISURA] Sono già sulla pagina Elenco Immobili, salto Indietro per ris {result_index + 1}")
                             else:
                                 logger.info(f"[VISURA] Tornando indietro per processare il prossimo risultato ({result_index + 2})...")
@@ -732,7 +755,7 @@ async def run_visura(
                                     indietro_button = page.locator("input[name='indietro'][value='Indietro']")
                                     if await indietro_button.count() > 0:
                                         await indietro_button.first.click()
-                                        await page.wait_for_load_state("networkidle", timeout=30000)
+                                        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                                         logger.info(f"[VISURA] Tornato indietro, pronto per risultato {result_index + 2}")
                                         await page_logger.log(page, f"indietro_r{result_index + 1}")
                                     else:
@@ -747,6 +770,7 @@ async def run_visura(
 
                 except Exception as e:
                     logger.error(f"[VISURA] Errore estrazione intestati per risultato {result_index + 1}: {e}")
+                    consecutive_errors += 1
             else:
                 logger.info(
                     f"[VISURA] Estrazione intestati saltata per risultato {result_index + 1} (extract_intestati=False)"
@@ -755,6 +779,7 @@ async def run_visura(
             # Aggiungi questo risultato alla lista
             result_data = {"result_index": result_index + 1, "immobile": current_immobile_data, "intestati": intestati}
             all_results.append(result_data)
+            consecutive_errors = 0  # Reset su successo
             logger.info(f"[VISURA] Risultato {result_index + 1} completato: {len(intestati)} intestati trovati")
 
         logger.info(f"[VISURA] Completato processing di {len(all_results)} risultati")
@@ -798,7 +823,7 @@ async def run_visura(
 
                 if intestati_button:
                     await intestati_button.click()
-                    await page.wait_for_load_state("networkidle", timeout=30000)
+                    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                     logger.info("[VISURA] Intestati cliccato (metodo originale)")
                     await page_logger.log(page, "intestati_fallback")
 
@@ -823,7 +848,7 @@ async def run_visura(
                                 for i in range(count):
                                     try:
                                         table_elem = intestati_table.nth(i)
-                                        intestati_html = await table_elem.inner_html(timeout=10000)
+                                        intestati_html = await table_elem.inner_html(timeout=SHORT_WAIT)
 
                                         if (
                                             "Cognome" in intestati_html
@@ -917,7 +942,7 @@ async def logout(page: Page):
                 if count > 0:
                     await logout_button.first.click()
                     with suppress(Exception):
-                        await page.wait_for_load_state("domcontentloaded", timeout=10000)
+                        await page.wait_for_load_state("domcontentloaded", timeout=SHORT_WAIT)
                     logger.info(f"[LOGOUT] Logout effettuato con successo usando selettore: {selector}")
                     logout_success = True
                     break
@@ -961,9 +986,9 @@ async def extract_all_sezioni(page: Page, tipo_catasto: str = "T", max_province:
         # Naviga alla pagina di scelta servizio
         logger.info("[SEZIONI] Navigando alla pagina di scelta servizio...")
         await page.goto(
-            "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=60000
+            "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=EXTRA_LONG_WAIT
         )
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
         logger.info("[SEZIONI] Pagina caricata")
         await page_logger.log(page, "scelta_servizio")
 
@@ -996,13 +1021,13 @@ async def extract_all_sezioni(page: Page, tipo_catasto: str = "T", max_province:
 
                 logger.info("[SEZIONI] Cliccando Applica...")
                 await page.locator("input[type='submit'][value='Applica']").click()
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                 logger.info("[SEZIONI] Applica cliccato, pagina caricata")
 
                 # Vai alla ricerca immobili (stesso modo di run_visura)
                 logger.info("[SEZIONI] Cliccando link Immobile...")
                 await page.get_by_role("link", name="Immobile").click()
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                 logger.info("[SEZIONI] Link Immobile cliccato")
 
                 # Seleziona tipo catasto (stesso modo di run_visura)
@@ -1040,7 +1065,7 @@ async def extract_all_sezioni(page: Page, tipo_catasto: str = "T", max_province:
                         # Attiva selezione sezione (ESATTO come in run_visura)
                         logger.info("[SEZIONI] Cliccando 'scegli la sezione' per attivare dropdown...")
                         await page.locator("input[name='selSezione'][value='scegli la sezione']").click()
-                        await page.wait_for_load_state("networkidle", timeout=30000)
+                        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                         logger.info("[SEZIONI] Button sezione cliccato, dropdown attivato")
 
                         # Estrai le sezioni per questo comune (stesso modo di run_visura)
@@ -1122,9 +1147,9 @@ async def extract_all_sezioni(page: Page, tipo_catasto: str = "T", max_province:
                 # Torna alla pagina principale per la prossima provincia
                 logger.info("[SEZIONI] Tornando alla pagina principale per prossima provincia...")
                 await page.goto(
-                    "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=60000
+                    "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=EXTRA_LONG_WAIT
                 )
-                await page.wait_for_load_state("networkidle", timeout=30000)
+                await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
                 logger.info("[SEZIONI] Tornato alla pagina principale")
 
             except Exception as e:
@@ -1166,12 +1191,12 @@ async def run_visura_immobile(
     )
 
     if not subalterno:
-        raise ValueError("Il subalterno è obbligatorio per le visure per immobile specifico")
+        logger.info("[VISURA_IMMOBILE] Subalterno non specificato, procedendo con ricerca generica sulla particella")
 
     # STEP 1: Selezione Ufficio Provinciale
     logger.info("[VISURA_IMMOBILE] Navigando alla pagina di scelta servizio...")
-    await page.goto("https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=60000)
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.goto("https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=EXTRA_LONG_WAIT)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     logger.info("[VISURA_IMMOBILE] Pagina caricata")
     await page_logger.log(page, "scelta_servizio")
 
@@ -1191,13 +1216,13 @@ async def run_visura_immobile(
     await page.locator("select[name='listacom']").select_option(provincia_value)
     logger.info("[VISURA_IMMOBILE] Cliccando Applica...")
     await page.locator("input[type='submit'][value='Applica']").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     await page_logger.log(page, "provincia_applicata")
 
     # STEP 2: Ricerca per immobili
     logger.info("[VISURA_IMMOBILE] Cliccando link Immobile...")
     await page.get_by_role("link", name="Immobile").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     await page_logger.log(page, "immobile")
 
     # STEP 2.1: Seleziona tipo catasto FABBRICATI (F)
@@ -1218,7 +1243,7 @@ async def run_visura_immobile(
     if sezione:
         logger.info("[VISURA_IMMOBILE] Cliccando 'scegli la sezione' per attivare dropdown...")
         await page.locator("input[name='selSezione'][value='scegli la sezione']").click()
-        await page.wait_for_load_state("networkidle", timeout=30000)
+        await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
 
         # Controlla se ci sono sezioni disponibili
         options = await page.locator("select[name='sezione'] option").all()
@@ -1264,7 +1289,7 @@ async def run_visura_immobile(
     # Clicca Ricerca
     logger.info("[VISURA_IMMOBILE] Cliccando Ricerca...")
     await page.locator("input[name='scelta'][value='Ricerca']").click()
-    await page.wait_for_load_state("networkidle", timeout=30000)
+    await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
     await page_logger.log(page, "ricerca")
 
     # STEP 3: Gestisci conferma assenza subalterno (se necessario)
@@ -1273,7 +1298,7 @@ async def run_visura_immobile(
         if await conferma_button.count() > 0:
             logger.info("[VISURA_IMMOBILE] Rilevata richiesta conferma assenza subalterno...")
             await conferma_button.click()
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
             await page_logger.log(page, "conferma_subalterno")
     except Exception as e:
         logger.error(f"[VISURA_IMMOBILE] Errore o non necessaria conferma subalterno: {e}")
@@ -1297,6 +1322,13 @@ async def run_visura_immobile(
     logger.info("[VISURA_IMMOBILE] Cliccando Intestati...")
     intestati = []
     try:
+        # Log available inputs for debugging selectors
+        try:
+            input_values = await page.evaluate("() => Array.from(document.querySelectorAll('input')).map(i => ({name: i.name, value: i.value, type: i.type}))")
+            logger.debug(f"[DEBUG] Input presenti nella pagina: {input_values}")
+        except:
+            pass
+
         # Try multiple selectors for the Intestati button
         intestati_button_selectors = [
             "input[name='intestati'][value='Intestati']",
@@ -1323,7 +1355,7 @@ async def run_visura_immobile(
 
         if intestati_button:
             await intestati_button.click()
-            await page.wait_for_load_state("networkidle", timeout=30000)
+            await page.wait_for_load_state("networkidle", timeout=LONG_WAIT)
             logger.info("[VISURA_IMMOBILE] Intestati cliccato")
             await page_logger.log(page, "intestati")
 
@@ -1344,12 +1376,13 @@ async def run_visura_immobile(
                 try:
                     intestati_table = page.locator(selector)
                     count = await intestati_table.count()
+                    logger.debug(f"[DEBUG] Trovate {count} tabelle con selettore {selector}")
 
                     if count > 0:
                         for i in range(count):
                             try:
                                 table_elem = intestati_table.nth(i)
-                                intestati_html = await table_elem.inner_html(timeout=10000)
+                                intestati_html = await table_elem.inner_html(timeout=SHORT_WAIT)
 
                                 if (
                                     "Cognome" in intestati_html
@@ -1360,7 +1393,7 @@ async def run_visura_immobile(
                                     or "Titolarità" in intestati_html
                                 ):
                                     intestati = parse_table(intestati_html)
-                                    logger.info(f"[VISURA_IMMOBILE] Tabella Intestati estratta: {len(intestati)} righe")
+                                    logger.info(f"[VISURA_IMMOBILE] Tabella Intestati estratta con selettore {selector}: {len(intestati)} righe")
                                     break
                                 else:
                                     temp_intestati = parse_table(intestati_html)
@@ -1368,7 +1401,7 @@ async def run_visura_immobile(
                                         if "Foglio" not in intestati_html and "Particella" not in intestati_html:
                                             intestati = temp_intestati
                                             logger.info(
-                                                f"[VISURA_IMMOBILE] Tabella Intestati estratta (fallback): {len(intestati)} righe"
+                                                f"[VISURA_IMMOBILE] Tabella Intestati estratta (fallback) con selettore {selector}: {len(intestati)} righe"
                                             )
                                             break
                             except Exception as e:
@@ -1383,6 +1416,7 @@ async def run_visura_immobile(
                     continue
         else:
             logger.info("[VISURA_IMMOBILE] Bottone Intestati non trovato con nessun selettore")
+            await page_logger.log(page, "intestati_non_trovati")
 
             # Debug: stampa tutti gli input e button disponibili
             try:

@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 import httpx
 
 from memory.database import SessionLocal, ScheduledVisura, QueryCache, Immobile
-from memory.main import UPSTREAM_API_URL, MAX_PARALLEL_VISURE, QUEUE_POLLING_INTERVAL, get_params_hash, validate_and_canonicalize_params
+from memory.main import UPSTREAM_API_URL, MAX_PARALLEL_VISURE, QUEUE_POLLING_INTERVAL, validate_and_canonicalize_params
+from memory.scheduler import get_params_hash, schedule_scenario3_owners
 from memory.transformer import normalize_visura_data
 
 logger = logging.getLogger("memory-worker")
@@ -111,9 +112,15 @@ async def check_item_status(db: Session, item: ScheduledVisura):
                 try:
                     # Determine which key holds the results
                     results_list = raw_results.get("results", []) or raw_results.get("immobili", [])
-                    if not results_list and "results" not in raw_results and "immobili" not in raw_results:
-                        # Fallback for single result objects
-                        results_list = [raw_results] if raw_results.get("foglio") or raw_results.get("subalterno") else []
+                    if not results_list:
+                        # Fallback for single result objects (common for individual subaltern searches)
+                        if "immobile" in raw_results:
+                            results_list = [raw_results]
+                        elif raw_results.get("foglio") or raw_results.get("subalterno"):
+                            # Older fallback
+                            results_list = [raw_results]
+                        else:
+                            results_list = []
                     
                     params = {
                         "provincia": item.provincia,
@@ -137,7 +144,16 @@ async def check_item_status(db: Session, item: ScheduledVisura):
                 
                 # If Scenario 3 and it was a property search, schedule owner searches for results
                 if item.scenario == 3 and item.target_type == "PARTICELLA" and item.tipo_catasto != "T":
-                    await schedule_scenario3_owners(db, item, raw_results)
+                    await schedule_scenario3_owners(
+                        db, 
+                        item.provincia, 
+                        item.comune, 
+                        item.foglio, 
+                        item.particella, 
+                        item.sezione, 
+                        raw_results,
+                        tipo_catasto=item.tipo_catasto
+                    )
                 
                 db.commit()
             elif data.get("status") == "error":
@@ -148,40 +164,4 @@ async def check_item_status(db: Session, item: ScheduledVisura):
     except Exception as e:
         logger.warning(f"Error checking status for item {item.id}: {e}")
 
-async def schedule_scenario3_owners(db: Session, parent_item: ScheduledVisura, results: dict):
-    # Extract subalterns and schedule them
-    immobili = results.get("results", []) or results.get("immobili", [])
-    if not immobili and "results" not in results and "immobili" not in results:
-        # Maybe it's a single result
-        immobili = [results] if results.get("subalterno") else []
-
-    for res in immobili:
-        imm = res.get("immobile") if "immobile" in res else res
-        sub = imm.get("Subalterno") or imm.get("subalterno") or imm.get("Sub")
-        if not sub: continue
-        
-        # Check if already scheduled or done
-        exists = db.query(ScheduledVisura).filter(
-            ScheduledVisura.provincia == parent_item.provincia,
-            ScheduledVisura.comune == parent_item.comune,
-            ScheduledVisura.foglio == parent_item.foglio,
-            ScheduledVisura.particella == parent_item.particella,
-            ScheduledVisura.subalterno == sub,
-            ScheduledVisura.target_type == "SUBALTERNO"
-        ).first()
-        
-        if not exists:
-            new_item = ScheduledVisura(
-                target_type="SUBALTERNO",
-                scenario=3,
-                provincia=parent_item.provincia,
-                comune=parent_item.comune,
-                foglio=parent_item.foglio,
-                particella=parent_item.particella,
-                subalterno=sub,
-                sezione=parent_item.sezione,
-                tipo_catasto=parent_item.tipo_catasto,
-                status="pending"
-            )
-            db.add(new_item)
-    db.commit()
+# schedule_scenario3_owners moved to memory.scheduler

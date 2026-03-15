@@ -13,7 +13,18 @@ from fastapi.responses import JSONResponse
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 from pydantic import BaseModel, Field, field_validator
 
-from utils import PageLogger, extract_all_sezioni, login, logout, run_visura, run_visura_immobile
+from utils import (
+    PageLogger, 
+    extract_all_sezioni, 
+    login, 
+    logout, 
+    run_visura, 
+    run_visura_immobile,
+    SHORT_WAIT,
+    MEDIUM_WAIT,
+    LONG_WAIT,
+    EXTRA_LONG_WAIT
+)
 
 # Carica variabili d'ambiente da .env
 load_dotenv()
@@ -120,8 +131,10 @@ class BrowserManager:
         self.auth_page: Optional[Page] = None
         self.authenticated = False
         self.keep_alive_running = False
+        self.is_busy = False  # Previene refresh concomitanti durante visure attive
         self.last_login_time: Optional[datetime] = None
         self.playwright: Any = None
+        self.lock = asyncio.Lock() # Lock per garantire accesso sequenziale al browser
 
     async def initialize(self):
         """Inizializza il browser e il contexto"""
@@ -157,40 +170,43 @@ class BrowserManager:
 
     async def login(self):
         """Esegue il login nella prima tab"""
-        try:
-            # Chiudi la vecchia pagina prima di crearne una nuova
-            if self.auth_page and getattr(self.auth_page, "is_closed", lambda: True)() is False:
-                try:
-                    await self.auth_page.close()
-                    logger.info("Vecchia pagina di autenticazione chiusa")
-                except Exception as e:
-                    logger.warning(f"Errore chiudendo vecchia pagina: {e}")
+        async with self.lock:
+            try:
+                # Chiudi la vecchia pagina prima di crearne una nuova
+                if self.auth_page and getattr(self.auth_page, "is_closed", lambda: True)() is False:
+                    try:
+                        await self.auth_page.close()
+                        logger.info("Vecchia pagina di autenticazione chiusa")
+                    except Exception as e:
+                        logger.warning(f"Errore chiudendo vecchia pagina: {e}")
 
-            for attempt in range(3):
-                try:
-                    page = await self.context.new_page()
-                    await login(page)
-                    break
-                except Exception as e:
-                    error_str = str(e).lower()
-                    if (
-                        "target page, context or browser has been closed" in error_str
-                        or "browser closed" in error_str
-                        or "target closed" in error_str
-                        or "cortesia_logout" in error_str
-                    ) and attempt < 2:
-                        logger.warning(f"Errore al login (logout di cortesia o browser chiuso) ({e}), reinizializzazione in corso... (tentativo {attempt+1}/3)")
-                        await self.initialize()
-                    else:
-                        raise
-            self.auth_page = page
-            self.authenticated = True
-            self.last_login_time = datetime.now()
-            logger.info("Login completato con successo")
-        except Exception as e:
-            logger.error(f"Errore durante il login: {e}")
-            self.authenticated = False
-            raise AuthenticationError(f"Login failed: {e}") from e
+                for attempt in range(3):
+                    try:
+                        page = await self.context.new_page()
+                        await login(page)
+                        break
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        if (
+                            "target page, context or browser has been closed" in error_str
+                            or "browser closed" in error_str
+                            or "target closed" in error_str
+                            or "cortesia_logout" in error_str
+                        ) and attempt < 2:
+                            logger.warning(
+                                f"Errore al login (logout di cortesia o browser chiuso) ({e}), reinizializzazione in corso... (tentativo {attempt+1}/3)"
+                            )
+                            await self.initialize()
+                        else:
+                            raise
+                self.auth_page = page
+                self.authenticated = True
+                self.last_login_time = datetime.now()
+                logger.info("Login completato con successo")
+            except Exception as e:
+                logger.error(f"Errore durante il login: {e}")
+                self.authenticated = False
+                raise AuthenticationError(f"Login failed: {e}") from e
 
     async def start_keep_alive(self):
         """Mantiene la sessione attiva con attività realistiche"""
@@ -232,35 +248,44 @@ class BrowserManager:
 
     async def _perform_session_refresh(self):
         """Refresh approfondito della sessione navigando alla pagina di scelta servizio"""
-        try:
-            logger.info("Eseguendo refresh della sessione...")
+        if self.is_busy:
+            logger.info("Salto refresh sessione: visura in corso (mantiene comunque viva la sessione)")
+            return True
 
-            if not self.auth_page:
-                return False
-
-            await self.auth_page.goto(
-                "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=30000
-            )
-            await self.auth_page.wait_for_load_state("networkidle", timeout=15000)
-
+        async with self.lock:
+            # Check di nuovo sotto lock in caso sia cambiato
+            if self.is_busy:
+                return True
+                
             try:
-                provincia_options = await self.auth_page.locator("select[name='listacom'] option").count()
-                if provincia_options <= 1:
-                    logger.warning("Sessione scaduta durante refresh - province non disponibili")
+                logger.info("Eseguendo refresh della sessione...")
+
+                if not self.auth_page:
+                    return False
+
+                await self.auth_page.goto(
+                    "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=LONG_WAIT
+                )
+                await self.auth_page.wait_for_load_state("networkidle", timeout=MEDIUM_WAIT)
+
+                try:
+                    provincia_options = await self.auth_page.locator("select[name='listacom'] option").count()
+                    if provincia_options <= 1:
+                        logger.warning("Sessione scaduta durante refresh - province non disponibili")
+                        self.authenticated = False
+                        return False
+                    else:
+                        logger.info(f"Session refresh completato - {provincia_options-1} province disponibili")
+                        return True
+                except Exception as e:
+                    logger.warning(f"Errore nel verificare province: {e}")
                     self.authenticated = False
                     return False
-                else:
-                    logger.info(f"Session refresh completato - {provincia_options-1} province disponibili")
-                    return True
+
             except Exception as e:
-                logger.warning(f"Errore nel verificare province: {e}")
+                logger.error(f"Errore in session refresh: {e}")
                 self.authenticated = False
                 return False
-
-        except Exception as e:
-            logger.error(f"Errore in session refresh: {e}")
-            self.authenticated = False
-            return False
 
     async def stop_keep_alive(self):
         """Ferma il keep-alive"""
@@ -280,9 +305,9 @@ class BrowserManager:
 
             if "SceltaServizio.do" not in current_url:
                 await self.auth_page.goto(
-                    "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=30000
+                    "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=LONG_WAIT
                 )
-                await self.auth_page.wait_for_load_state("networkidle", timeout=15000)
+                await self.auth_page.wait_for_load_state("networkidle", timeout=MEDIUM_WAIT)
 
             provincia_options = await self.auth_page.locator("select[name='listacom'] option").count()
             if provincia_options <= 1:
@@ -308,9 +333,9 @@ class BrowserManager:
 
             # Prova a navigare direttamente alla pagina Visure
             await self.auth_page.goto(
-                "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=30000
+                "https://sister3.agenziaentrate.gov.it/Visure/SceltaServizio.do?tipo=/T/TM/VCVC_", timeout=LONG_WAIT
             )
-            await self.auth_page.wait_for_load_state("networkidle", timeout=15000)
+            await self.auth_page.wait_for_load_state("networkidle", timeout=MEDIUM_WAIT)
             await recovery_logger.log(self.auth_page, "goto_scelta_servizio")
 
             current_url = self.auth_page.url
@@ -337,13 +362,13 @@ class BrowserManager:
             # Se la pagina è quella giusta ma senza province, proviamo il percorso completo
             if "agenziaentrate.gov.it" in current_url and "sister" in current_url:
                 try:
-                    await self.auth_page.get_by_role("button", name="Conferma").click(timeout=5000)
+                    await self.auth_page.get_by_role("button", name="Conferma").click(timeout=SHORT_WAIT)
                     await recovery_logger.log(self.auth_page, "conferma")
-                    await self.auth_page.get_by_role("link", name="Consultazioni e Certificazioni").click(timeout=5000)
+                    await self.auth_page.get_by_role("link", name="Consultazioni e Certificazioni").click(timeout=SHORT_WAIT)
                     await recovery_logger.log(self.auth_page, "consultazioni")
-                    await self.auth_page.get_by_role("link", name="Visure catastali").click(timeout=5000)
+                    await self.auth_page.get_by_role("link", name="Visure catastali").click(timeout=SHORT_WAIT)
                     await recovery_logger.log(self.auth_page, "visure_catastali")
-                    await self.auth_page.get_by_role("link", name="Conferma Lettura").click(timeout=5000)
+                    await self.auth_page.get_by_role("link", name="Conferma Lettura").click(timeout=SHORT_WAIT)
                     await recovery_logger.log(self.auth_page, "conferma_lettura")
 
                     logger.info("Sessione SISTER recuperata tramite navigazione interna")
@@ -383,94 +408,100 @@ class BrowserManager:
 
     async def esegui_visura(self, request: VisuraRequest) -> VisuraResponse:
         """Esegue una visura catastale"""
-        try:
-            await self._ensure_authenticated()
-
+        async with self.lock:
             try:
-                # Per i terreni estraiamo sempre gli intestati, per i fabbricati no
-                extract_intestati = request.tipo_catasto == "T"
+                self.is_busy = True
+                await self._ensure_authenticated()
 
-                result = await run_visura(
-                    self.auth_page,
-                    request.provincia,
-                    request.comune,
-                    request.sezione,
-                    request.foglio,
-                    request.particella,
-                    request.tipo_catasto,
-                    extract_intestati,
+                try:
+                    # Per i terreni estraiamo sempre gli intestati, per i fabbricati no
+                    extract_intestati = request.tipo_catasto == "T"
+
+                    result = await run_visura(
+                        self.auth_page,
+                        request.provincia,
+                        request.comune,
+                        request.sezione,
+                        request.foglio,
+                        request.particella,
+                        request.tipo_catasto,
+                        extract_intestati,
+                    )
+                    logger.info(f"Visura completata per request {request.request_id}")
+                    return VisuraResponse(
+                        request_id=request.request_id,
+                        success=True,
+                        tipo_catasto=request.tipo_catasto,
+                        data=result,
+                    )
+                except Exception as e:
+                    raise BrowserError(f"Failed to execute visura: {e}") from e
+            except (AuthenticationError, BrowserError) as e:
+                logger.error(f"Errore in visura {request.request_id}: {e}")
+                return VisuraResponse(
+                    request_id=request.request_id,
+                    success=False,
+                    tipo_catasto=request.tipo_catasto,
+                    error=str(e),
                 )
             except Exception as e:
-                raise BrowserError(f"Failed to execute visura: {e}") from e
-
-            logger.info(f"Visura completata per request {request.request_id}")
-            return VisuraResponse(
-                request_id=request.request_id,
-                success=True,
-                tipo_catasto=request.tipo_catasto,
-                data=result,
-            )
-
-        except (AuthenticationError, BrowserError) as e:
-            logger.error(f"Errore in visura {request.request_id}: {e}")
-            return VisuraResponse(
-                request_id=request.request_id,
-                success=False,
-                tipo_catasto=request.tipo_catasto,
-                error=str(e),
-            )
-        except Exception as e:
-            logger.error(f"Errore inatteso in visura {request.request_id}: {e}")
-            return VisuraResponse(
-                request_id=request.request_id,
-                success=False,
-                tipo_catasto=request.tipo_catasto,
-                error=f"Errore inatteso: {str(e)}",
-            )
+                logger.error(f"Errore inatteso in visura {request.request_id}: {e}")
+                return VisuraResponse(
+                    request_id=request.request_id,
+                    success=False,
+                    tipo_catasto=request.tipo_catasto,
+                    error=f"Errore inatteso: {str(e)}",
+                )
+            finally:
+                self.is_busy = False
 
     async def esegui_visura_intestati(self, request: VisuraIntestatiRequest) -> VisuraResponse:
         """Esegue una visura per ottenere gli intestati di un immobile specifico."""
-        try:
-            await self._ensure_authenticated()
-
-            if request.tipo_catasto == "F" and request.subalterno:
-                result = await run_visura_immobile(
-                    self.auth_page,
-                    provincia=request.provincia,
-                    comune=request.comune,
-                    sezione=request.sezione,
-                    foglio=request.foglio,
-                    particella=request.particella,
-                    subalterno=request.subalterno,
+        async with self.lock:
+            try:
+                self.is_busy = True
+                await self._ensure_authenticated()
+                try:
+                    if request.tipo_catasto == "F" and request.subalterno:
+                        result = await run_visura_immobile(
+                            self.auth_page,
+                            provincia=request.provincia,
+                            comune=request.comune,
+                            sezione=request.sezione,
+                            foglio=request.foglio,
+                            particella=request.particella,
+                            subalterno=request.subalterno,
+                        )
+                    else:
+                        result = await run_visura(
+                            self.auth_page,
+                            request.provincia,
+                            request.comune,
+                            request.sezione,
+                            request.foglio,
+                            request.particella,
+                            request.tipo_catasto,
+                            extract_intestati=True,
+                        )
+                    logger.info(f"Visura intestati completata per {request.request_id}")
+                    return VisuraResponse(
+                        request_id=request.request_id,
+                        success=True,
+                        tipo_catasto=request.tipo_catasto,
+                        data=result,
+                    )
+                except Exception as e:
+                    raise BrowserError(f"Failed to execute visura intestati: {e}") from e
+            except Exception as e:
+                logger.error(f"Errore in visura intestati {request.request_id}: {e}")
+                return VisuraResponse(
+                    request_id=request.request_id,
+                    success=False,
+                    tipo_catasto=request.tipo_catasto,
+                    error=str(e),
                 )
-            else:
-                result = await run_visura(
-                    self.auth_page,
-                    request.provincia,
-                    request.comune,
-                    request.sezione,
-                    request.foglio,
-                    request.particella,
-                    request.tipo_catasto,
-                    extract_intestati=True,
-                )
-
-            logger.info(f"Visura intestati completata per {request.request_id}")
-            return VisuraResponse(
-                request_id=request.request_id,
-                success=True,
-                tipo_catasto=request.tipo_catasto,
-                data=result,
-            )
-
-        except Exception as e:
-            logger.error(f"Errore in visura intestati {request.request_id}: {e}")
-            return VisuraResponse(
-                request_id=request.request_id,
-                success=False,
-                tipo_catasto=request.tipo_catasto,
-                error=str(e),
-            )
+            finally:
+                self.is_busy = False
 
     async def restart_browser_if_needed(self):
         """Riavvia il browser se necessario"""
@@ -700,7 +731,8 @@ class VisuraIntestatiInput(BaseModel):
         # info.data contains other fields in V2
         tipo_catasto = info.data.get("tipo_catasto")
         if tipo_catasto == "F" and not v:
-            raise ValidationError("subalterno è obbligatorio per i fabbricati (tipo_catasto='F')")
+            # Relaxed to allow for Institutional buildings (Category B) or units that represent the entire parcel
+            return v
         if tipo_catasto == "T" and v:
             raise ValidationError("subalterno non va indicato per i terreni (tipo_catasto='T')")
         return v
@@ -876,9 +908,13 @@ async def extract_sezioni(request: SezioniExtractionRequest, service: VisuraServ
         if not service.browser_manager.authenticated or not service.browser_manager.auth_page:
             raise HTTPException(status_code=503, detail="Servizio non autenticato")
 
-        sezioni_data = await extract_all_sezioni(
-            service.browser_manager.auth_page, request.tipo_catasto, request.max_province
-        )
+        try:
+            service.browser_manager.is_busy = True
+            sezioni_data = await extract_all_sezioni(
+                service.browser_manager.auth_page, request.tipo_catasto, request.max_province
+            )
+        finally:
+            service.browser_manager.is_busy = False
 
         if not sezioni_data:
             return JSONResponse({"status": "no_data", "message": "Nessuna sezione estratta", "count": 0})

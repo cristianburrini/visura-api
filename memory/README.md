@@ -70,10 +70,17 @@ If the `UPSTREAM_API_URL` is unreachable:
 - New requests will fail with a `503 Service Unavailable` until the upstream is restored.
 
 ### Supported Endpoints
-- `POST /visura`
-- `POST /visura/intestati`
-- `GET /visura/{proxy_id}`
-- `DELETE /cache/{proxy_id}` (Manual invalidation)
+- `POST /visura` (Request standard property search)
+- `POST /visura/intestati` (Request owner search)
+- `GET /visura/{proxy_id}` (Poll status and retrieve results)
+- `DELETE /cache/{proxy_id}` (Manual cache entry invalidation)
+- `POST /massive/schedule` (Schedule a massive batch of targets for background processing)
+- `GET /massive/status` (Retrieve overall statistics and queue status for massive processing)
+- `POST /catalog/reload` (Trigger manual reload of static catalog data)
+- `GET /catalog/comuni` (Fuzzy search for comuni)
+- `GET /catalog/comuni/{cod_cat}/sheets` (List available sheets for a comune)
+- `GET /catalog/comuni/{cod_cat}/sheets/{foglio}/parcels` (List available parcels for a sheet)
+- `GET /health` (System health check)
 
 ## Database Access & Schema
 

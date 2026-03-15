@@ -91,7 +91,9 @@ Questo avvierà l'interfaccia di test ufficiale per verificare il comportamento 
 ### Strumenti Disponibili
 L'MCP espone diversi strumenti per gli agenti:
 - **Visura**: `avvia_ricerca_immobili_o_terreni`, `avvia_ricerca_intestatari`, `recupera_risultati_ricerca`.
+- **Massive Processing**: `mcp_visure_massive_schedule`, `mcp_visure_massive_status`.
 - **Catalogo**: `mcp_visure_search_comune`, `mcp_visure_list_parcels`, `mcp_visure_reload_catalog`.
 - **Utility**: `mcp_visure_get_health`.
+- **Cache**: `mcp_visure_cache_delete`.
 
 Vedi [Esempi di Utilizzo](docs/mcp_examples.md) per i dettagli.

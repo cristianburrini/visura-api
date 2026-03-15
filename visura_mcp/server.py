@@ -217,6 +217,102 @@ async def mcp_visure_get_health() -> str:
         except Exception as e:
             return f"Error connecting to API health endpoint: {str(e)}"
 
+# --- Massive Processing Tools ---
+
+@mcp.tool()
+async def mcp_visure_massive_schedule(
+    scenario: int,
+    provincia: str,
+    comune: str,
+    targets: list,
+    tipo_catasto: Optional[str] = None
+) -> str:
+    """
+    Schedules a massive batch of targets for background processing.
+    
+    PARAMETRI:
+    - scenario: 1 (Property searches), 2 (Owner searches), 3 (Both combined).
+    - provincia: Nome della provincia (es: 'ROMA', 'TR').
+    - comune: Nome del comune.
+    - targets: Lista di dizionari con target, es: [{"foglio": "10", "particella": "100", "subalterno": "1"}].
+    - tipo_catasto: 'T' per Terreni, 'F' per Fabbricati.
+    
+    RITORNO:
+    - Stringa con i risultati dello scheduling.
+    
+    ISTRUZIONI PER AGENTI:
+    - Usa questo tool per inviare molteplici visure in un colpo solo invece di chiamare ripetutamente `avvia_ricerca_immobili_o_terreni`.
+    - Il sistema salta automaticamente i duplicati e le visure già presenti in cache.
+    - I `targets` devono corrispondere alla struttura richiesta per lo scenario scelto.
+    """
+    payload = {
+        "scenario": scenario,
+        "provincia": provincia,
+        "comune": comune,
+        "targets": targets,
+        "tipo_catasto": tipo_catasto
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(f"{VISURA_API_URL}/massive/schedule", json=payload, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+            return f"Scheduling Completato. Programmati: {data.get('scheduled')}, Saltati (già fatti): {data.get('skipped')}. Messaggio: {data.get('message')}"
+        except httpx.HTTPStatusError as e:
+            return f"API Error: {e.response.text}"
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+@mcp.tool()
+async def mcp_visure_massive_status() -> str:
+    """
+    Retrieve overall statistics and queue status for massive processing.
+    
+    RITORNO:
+    - Stringa JSON con le statistiche correnti della coda (pending, submitted, done, error) e gli ultimi target completati.
+    
+    ISTRUZIONI PER AGENTI:
+    - Usa questo strumento per monitorare il progresso generale delle lavorazioni massive invece di interrogarne una per una.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(f"{VISURA_API_URL}/massive/status", timeout=10.0)
+            response.raise_for_status()
+            return str(response.json())
+        except httpx.HTTPStatusError as e:
+            return f"API Error: {e.response.text}"
+        except Exception as e:
+            return f"Error connecting to API health endpoint: {str(e)}"
+
+# --- Cache Tools ---
+
+@mcp.tool()
+async def mcp_visure_cache_delete(
+    proxy_id: str
+) -> str:
+    """
+    Manual cache entry invalidation if needed.
+    
+    PARAMETRI:
+    - proxy_id: L'ID della richiesta proxy da invalidare, es: 'proxy_123'.
+    
+    RITORNO:
+    - Esito dell'operazione di cancellazione della cache.
+    
+    ISTRUZIONI PER AGENTI:
+    - Usare solo se necessario forzare un ricaricamento di un dato obsoleto invalidando la entry.
+    """
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.delete(f"{VISURA_API_URL}/cache/{proxy_id}", timeout=10.0)
+            response.raise_for_status()
+            return str(response.json())
+        except httpx.HTTPStatusError as e:
+            return f"API Error: {e.response.text}"
+        except Exception as e:
+            return f"Error connecting to API health endpoint: {str(e)}"
+
 # --- Catalog Tools ---
 
 @mcp.tool()

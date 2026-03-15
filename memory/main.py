@@ -345,33 +345,37 @@ async def schedule_massive(request: MassiveScheduleInput, db: Session = Depends(
     """Schedules a massive batch of targets for visure submission."""
     res_counts: Dict[str, int] = {"scheduled": 0, "skipped": 0}
     for target in request.targets:
-        # Construct full target data for validation and duplicate check
-        target_data = {
-            "provincia": request.provincia,
-            "comune": request.comune,
-            "foglio": str(target.get("foglio")),
-            "particella": str(target.get("particella")),
-            "sezione": target.get("sezione"),
-            "subalterno": target.get("subalterno"),
-            "tipo_catasto": request.tipo_catasto
-        }
-        # Scenario mapping: 1 and 3 are property searches (PARTICELLA), 2 is owner search (SUBALTERNO)
-        target_type = "PARTICELLA" if request.scenario in [1, 3] else "SUBALTERNO"
-        
-        # Prevent redundant processing
-        if is_already_done(db, target_data, request.scenario):
-            res_counts["skipped"] += 1
-            continue
+        target_tipo = request.tipo_catasto
+        tipos_catasto = [target_tipo] if target_tipo else ["T", "F"]
+
+        for tc in tipos_catasto:
+            # Construct full target data for validation and duplicate check
+            target_data = {
+                "provincia": request.provincia,
+                "comune": request.comune,
+                "foglio": str(target.get("foglio")),
+                "particella": str(target.get("particella")),
+                "sezione": target.get("sezione"),
+                "subalterno": target.get("subalterno"),
+                "tipo_catasto": tc
+            }
+            # Scenario mapping: 1 and 3 are property searches (PARTICELLA), 2 is owner search (SUBALTERNO)
+            target_type = "PARTICELLA" if request.scenario in [1, 3] else "SUBALTERNO"
             
-        new_item = ScheduledVisura(
-            target_type=target_type, scenario=request.scenario,
-            provincia=target_data["provincia"], comune=target_data["comune"],
-            foglio=target_data["foglio"], particella=target_data["particella"],
-            subalterno=target_data["subalterno"], sezione=target_data["sezione"],
-            tipo_catasto=target_data["tipo_catasto"], status="pending"
-        )
-        db.add(new_item)
-        res_counts["scheduled"] += 1
+            # Prevent redundant processing
+            if is_already_done(db, target_data, request.scenario):
+                res_counts["skipped"] += 1
+                continue
+                
+            new_item = ScheduledVisura(
+                target_type=target_type, scenario=request.scenario,
+                provincia=target_data["provincia"], comune=target_data["comune"],
+                foglio=target_data["foglio"], particella=target_data["particella"],
+                subalterno=target_data["subalterno"], sezione=target_data["sezione"],
+                tipo_catasto=target_data["tipo_catasto"], status="pending"
+            )
+            db.add(new_item)
+            res_counts["scheduled"] += 1
         
     db.commit()
     return {

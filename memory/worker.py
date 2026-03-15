@@ -5,8 +5,9 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 import httpx
 
-from memory.database import SessionLocal, ScheduledVisura, QueryCache
+from memory.database import SessionLocal, ScheduledVisura, QueryCache, Immobile
 from memory.main import UPSTREAM_API_URL, MAX_PARALLEL_VISURE, QUEUE_POLLING_INTERVAL, get_params_hash, validate_and_canonicalize_params
+from memory.transformer import normalize_visura_data
 
 logger = logging.getLogger("memory-worker")
 
@@ -103,13 +104,40 @@ async def check_item_status(db: Session, item: ScheduledVisura):
             data = response.json()
             
             if data.get("status") == "completed":
-                logger.info(f"Item {item.id} completed successfully")
+                raw_results = data.get("data", {})
+                logger.info(f"Item {item.id} completed successfully. Persisting data...")
+                
+                # Persistence logic
+                try:
+                    # Determine which key holds the results
+                    results_list = raw_results.get("results", []) or raw_results.get("immobili", [])
+                    if not results_list and "results" not in raw_results and "immobili" not in raw_results:
+                        # Fallback for single result objects
+                        results_list = [raw_results] if raw_results.get("foglio") or raw_results.get("subalterno") else []
+                    
+                    params = {
+                        "provincia": item.provincia,
+                        "comune": item.comune,
+                        "foglio": item.foglio,
+                        "particella": item.particella,
+                        "sezione": item.sezione,
+                        "subalterno": item.subalterno,
+                        "tipo_catasto": item.tipo_catasto
+                    }
+                    
+                    normalize_visura_data(db, results_list, params)
+                    db.commit()
+                except Exception as e:
+                    logger.error(f"Persistence failed for item {item.id}: {e}")
+                    # We continue to mark as done if we want, or error. 
+                    # Let's mark as done but log the error for now as the upstream was successful.
+
                 item.status = "done"
                 item.completed_at = datetime.utcnow()
                 
                 # If Scenario 3 and it was a property search, schedule owner searches for results
-                if item.scenario == 3 and item.target_type == "PARTICELLA":
-                    await schedule_scenario3_owners(db, item, data.get("data"))
+                if item.scenario == 3 and item.target_type == "PARTICELLA" and item.tipo_catasto != "T":
+                    await schedule_scenario3_owners(db, item, raw_results)
                 
                 db.commit()
             elif data.get("status") == "error":

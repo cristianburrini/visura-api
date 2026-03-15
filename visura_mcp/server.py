@@ -225,7 +225,7 @@ async def mcp_visure_massive_schedule(
     provincia: str,
     comune: str,
     targets: list,
-    tipo_catasto: Optional[str] = None
+    tipo_catasto: Optional[str] = "F"
 ) -> str:
     """
     Schedules a massive batch of targets for background processing.

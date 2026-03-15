@@ -23,12 +23,12 @@ from memory.scheduler import get_params_hash, is_already_done, schedule_scenario
 
 # Configuration
 UPSTREAM_API_URL = os.getenv("UPSTREAM_API_URL", "http://visure-api:8000")
-CACHE_EXPIRATION_DAYS = int(os.getenv("CACHE_EXPIRATION_DAYS", "30"))
+CACHE_EXPIRATION_DAYS = int(os.getenv("CACHE_EXPIRATION_DAYS", "365"))
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 # Massive Submission Configuration
-MAX_PARALLEL_VISURE = int(os.getenv("MAX_PARALLEL_VISURE", "2"))
-QUEUE_POLLING_INTERVAL = int(os.getenv("QUEUE_POLLING_INTERVAL", "5"))
+MAX_PARALLEL_VISURE = int(os.getenv("MAX_PARALLEL_VISURE", "5"))
+QUEUE_POLLING_INTERVAL = int(os.getenv("QUEUE_POLLING_INTERVAL", "10"))
 
 logging.basicConfig(level=getattr(logging, LOG_LEVEL))
 logger = logging.getLogger("memory-proxy")

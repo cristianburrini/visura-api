@@ -261,7 +261,7 @@ async def run_visura(
     sezione=None,
     foglio="9",
     particella="166",
-    tipo_catasto="T",
+    tipo_catasto="F",
     extract_intestati=True,
 ):
     time0 = time.time()

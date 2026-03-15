@@ -1,6 +1,6 @@
 import pytest
 import respx
-from visura_mcp.server import avvia_ricerca_immobili_o_terreni, richiedi_stato_ricerca, avvia_ricerca_intestatari, get_health
+from visura_mcp.server import avvia_ricerca_immobili_o_terreni, richiedi_stato_ricerca, avvia_ricerca_intestatari, mcp_visure_get_health
 
 @pytest.mark.asyncio
 @respx.mock
@@ -47,7 +47,7 @@ async def test_get_health_success():
         "queue_size": 0
     })
     
-    result = await get_health()
+    result = await mcp_visure_get_health()
     assert "API Status: healthy" in result
     assert "Authenticated: True" in result
     assert "Queue Size: 0" in result

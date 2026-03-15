@@ -3,7 +3,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, Optional, Any, List
 
@@ -73,7 +73,7 @@ class VisuraRequest:
     particella: str
     sezione: Optional[str] = None
     subalterno: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
@@ -92,7 +92,7 @@ class VisuraIntestatiRequest:
     particella: str
     subalterno: Optional[str] = None
     sezione: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
@@ -106,7 +106,7 @@ class VisuraResponse:
     tipo_catasto: str
     data: Optional[Dict] = None
     error: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=datetime.now)
 
     def __post_init__(self):
         if self.timestamp is None:
